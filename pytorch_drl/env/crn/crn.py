@@ -352,7 +352,7 @@ class CRN(Env):
         elif func == 'negative_sqrtre':
             reward -= relative_error ** 0.5
         elif func == 'in_tolerance':
-            reward = 0.0 if self._in_tolerance else -1.0
+            reward = 1.0 if self._in_tolerance else 0.0
         elif func == 'scaled_se':
             reward = -squared_error * 100 + self._count_in_tolerance * 10
         elif func == 'scaled_sle':
