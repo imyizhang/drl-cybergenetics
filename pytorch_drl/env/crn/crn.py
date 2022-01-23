@@ -474,7 +474,7 @@ class CRN(Env):
             axs[0, 1].fill_between(t, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
             axs[0, 1].plot(T, G, 'o-', label='G', color=c_G)
             axs[0, 1].plot(T, G_observed, 'o--', label='G observed', color=c_G, alpha=0.5)
-            axs[0, 1].set_ylabel('concentration fold change (1/min)')
+            axs[0, 1].set_ylabel('concentration fold change')
             axs[0, 1].legend(framealpha=0.2)
             # subplot reward
             axs[1, 1].plot(T[1:], reward, color=c_reward)
