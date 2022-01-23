@@ -437,7 +437,7 @@ class CRN(Env):
             axs[0].plot(t, ref_trajectory, '--', color='grey')
             axs[0].fill_between(t, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
             axs[0].plot(T, G_observed, 'o--', label='G observed', color=c_G, alpha=0.5)
-            axs[0].set_ylabel('concentration fold change (1/min)')
+            axs[0].set_ylabel('concentration fold change')
             axs[0].legend(framealpha=0.2)
             # subplot intensity
             axs[1].plot(t_u, u, '-', label='u', color=c_u)
@@ -461,7 +461,7 @@ class CRN(Env):
             axs[0, 0].plot(T, R, 'o-', label='R', color=c_R)
             axs[0, 0].plot(T, P, 'o-', label='P', color=c_P)
             axs[0, 0].plot(T, G, 'o-', label='G', color=c_G)
-            axs[0, 0].set_ylabel('concentration fold change (1/min)')
+            axs[0, 0].set_ylabel('concentration fold change')
             axs[0, 0].legend(framealpha=0.2)
             # subplot intensity
             axs[1, 0].plot(t_u, u, '-', label='u', color=c_u)
