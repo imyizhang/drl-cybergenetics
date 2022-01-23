@@ -41,12 +41,6 @@ class ERScheduler(abc.ABC):
         setattr(self.agent, 'eps_threshold', self.curr_er)
 
 
-class ConstantER(ERScheduler):
-
-    def __call__(self):
-        pass
-
-
 class LinearER(ERScheduler):
 
     def __call__(self):
