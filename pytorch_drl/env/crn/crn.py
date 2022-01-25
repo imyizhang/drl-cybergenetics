@@ -73,6 +73,7 @@ class CRN(Env):
         action_noise: float = 1e-3,
         system_noise: float = 1e-3,
         theta: list = [d_r, d_p, k_m, b_r],
+        light_intensity: float = 1,
         observation_mode: str = 'partially_observed',
         extra_info: bool = False,
     ) -> None:
@@ -96,6 +97,8 @@ class CRN(Env):
         self._B_c = np.array([[self._d_r, self._b_r],
                               [0.0, 0.0],
                               [0.0, 0.0]])
+        # light intensity for further developing
+        self._light_intensity = light_intensity
         # observation mode, either noise corrupted G or perfect R, P, G would be observed by an agent
         self._observation_mode = observation_mode
         # whether observed state includes extra info about tracking reference
@@ -176,10 +179,10 @@ class CRN(Env):
     def _reset(self) -> np.ndarray:
         self._init()
         # state
-        state = np.ones((3,))  # R = P = G = 1
+        state = np.ones((3,))  # initially, R = P = G = 1
         self._trajectory.append(state)
         # observation
-        observation = state[[2]]  # G = 1
+        observation = state[[2]]  # initially, G = 1
         self._observations.append(observation)
         # noise corrupted G observed
         if self._observation_mode == 'partially_observed':
@@ -201,11 +204,11 @@ class CRN(Env):
     def _G(self) -> typing.Optional[np.ndarray]:
         """Current G."""
         # perfect G
-        if self._trajectory:
-            return self._trajectory[self._steps_done][[2]]
-        # or noise corrupted G ?
-        #if self._observations:
-        #    return self._observations[self._steps_done]
+        #if self._trajectory:
+        #    return self._trajectory[self._steps_done][[2]]
+        # noise corrupted G
+        if self._observations:
+            return self._observations[self._steps_done]
         return None
 
     @property
@@ -268,18 +271,20 @@ class CRN(Env):
         self._actions.append(action)
 
         # noise corrupted action taken
-        action += self._rng.normal(0.0, self._action_noise)
-        action = np.clip(action, 0.0, 1.0)  # clip to [0.0, 1.0)
-        self._actions_taken.append(action)
+        action_taken = action + self._rng.normal(0.0, self._action_noise)
+        action_taken = np.clip(action_taken, 0.0, 1.0)  # clip to [0.0, 1.0)
+        self._actions_taken.append(action_taken)
 
         # state
+        u = 5.134 / (1 + 5.411 * np.exp(-0.0698 * action_taken * 100)) + 0.1992 - 1  # dose-response characterization, u = f(U), U(0) = 0 should yield u(0) = 0
         delta = 0.1  # system dynamics simulation sampling rate
         sol = solve_ivp(
             self._func,
             (0, self._T_s + delta),
             self._trajectory[self._steps_done],
             t_eval=np.arange(0, self._T_s + delta, delta),
-            args=(action,),
+            args=(action_taken,),
+            #args=(u,),
         )  # system dynamics simulation
         state = sol.y[:, -1]
         state += self._rng.normal(0.0, self._system_noise)  # system noise simulation
@@ -304,7 +309,8 @@ class CRN(Env):
 
         # info
         info = {
-            'action_taken': action,
+            'action': action,
+            'action_taken': action_taken,
             'state': state,
             'observation': observation,
             'count_in_tolerance': self._count_in_tolerance,
@@ -317,8 +323,8 @@ class CRN(Env):
         # perfect R, P, G observed
         return state, reward, done, info
 
-    def _func(self, t: float, y: np.ndarray, action: float) -> np.ndarray:
-        a = np.array([1.0, action])
+    def _func(self, t: float, y: np.ndarray, u: float) -> np.ndarray:
+        a = np.array([1.0, u])
         return self._A_c @ y + self._B_c @ a
 
     def _compute_reward(
@@ -393,9 +399,9 @@ class CRN(Env):
         # noise corrupted actions taken
         _actions_taken = actions_taken if replay else self._actions_taken
         # perfect R, P, G states
-        _trajectory = trajectory if replay else self._trajectory
+        _trajectory = [np.ones((3,))] + trajectory if replay else self._trajectory
         # noise corrupted G observations
-        _observations = observations if replay else self._observations
+        _observations = [np.ones((1,))] + observations if replay else self._observations
         # rewards measuring the distance between perfect G and reference trajectory
         _rewards = rewards if replay else self._rewards
         # steps done
@@ -410,18 +416,18 @@ class CRN(Env):
         R, P, G = np.stack(_trajectory, axis=1)
         # fluorescent observed
         G_observed = np.concatenate(_observations, axis=0)
-        # intensity
-        t_u = np.concatenate([
+        # intensity percentage
+        t_U = np.concatenate([
             np.arange(self._T_s * i, self._T_s * (i + 1) + 1) for i in range(_steps_done)
         ])
-        u = np.array(_actions).repeat(self._T_s + 1) * 100
-        u_applied = np.array(_actions_taken).repeat(self._T_s + 1) * 100
+        U = np.array(_actions).repeat(self._T_s + 1) * 100
+        U_applied = np.array(_actions_taken).repeat(self._T_s + 1) * 100
         # reward
         reward = np.array(_rewards)
 
         # plot colors
         c_R, c_P, c_G = ['tab:red', 'purple', 'green']
-        c_u = 'tab:blue'
+        c_U = 'tab:blue'
         c_reward = 'tab:orange'
         # experimental observation, partially shown
         if render_mode == 'human':
@@ -439,8 +445,8 @@ class CRN(Env):
             axs[0].plot(T, G_observed, 'o--', label='G observed', color=c_G, alpha=0.5)
             axs[0].set_ylabel('concentration fold change')
             axs[0].legend(framealpha=0.2)
-            # subplot intensity
-            axs[1].plot(t_u, u, '-', label='u', color=c_u)
+            # subplot intensity percentage
+            axs[1].plot(t_U, U, '-', label='U', color=c_U)
             axs[1].set_xlabel('Time (min)')
             axs[1].set_ylabel('intensity (%)')
             axs[1].legend(framealpha=0.2)
@@ -463,9 +469,9 @@ class CRN(Env):
             axs[0, 0].plot(T, G, 'o-', label='G', color=c_G)
             axs[0, 0].set_ylabel('concentration fold change')
             axs[0, 0].legend(framealpha=0.2)
-            # subplot intensity
-            axs[1, 0].plot(t_u, u, '-', label='u', color=c_u)
-            axs[1, 0].plot(t_u, u_applied, '--', label='u applied', color=c_u, alpha=0.5)
+            # subplot intensity percentage
+            axs[1, 0].plot(t_U, U, '-', label='U', color=c_U)
+            axs[1, 0].plot(t_U, U_applied, '--', label='U applied', color=c_U, alpha=0.5)
             axs[1, 0].set_xlabel('Time (min)')
             axs[1, 0].set_ylabel('intensity (%)')
             axs[1, 0].legend(framealpha=0.2)
@@ -487,7 +493,7 @@ class CRN(Env):
 
 
 class CRNContinuous(CRN):
-    """A dynamical fold-change model with continuous action space (u)."""
+    """A dynamical fold-change model with continuous action space (U)."""
 
     @property
     def discrete(self) -> bool:

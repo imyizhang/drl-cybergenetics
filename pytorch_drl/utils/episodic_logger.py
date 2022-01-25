@@ -60,26 +60,11 @@ class EpisodicLogger:
         self._counts_in_tolerance = 0
         self._loss_aggregator = 0
 
-    def reset(self):
-        self._init()
-        # state
-        state = np.ones((3,))  # R = P = G = 1
-        self._trajectory.append(state)
-        # observation
-        observation = state[[2]]  # G = 1
-        self._observations.append(observation)
-
-    def step(self, env, action, state, reward, info, losses):
-        # transform torch tensor to numpy array
-        if env.discrete:
-            _action = action.cpu().detach().item()
-            _action = (_action + 1) / env.action_dim
-        else:
-            _action = action.view(-1).cpu().detach().numpy()
+    def step(self, reward, info, losses):
         _reward = reward.cpu().detach().item()
         _loss = losses['loss/critic'].cpu().detach().item() if losses is not None else 0
         # step
-        self._actions.append(_action)
+        self._actions.append(info['action'])
         self._actions_taken.append(info['action_taken'])
         self._trajectory.append(info['state'])
         self._observations.append(info['observation'])
@@ -97,6 +82,7 @@ class EpisodicLogger:
         self.episode_duration.append(self._steps_done)
         self.episode_percent_in_tolerance.append(self._counts_in_tolerance / self._steps_done * 100)
         self.episode_loss.append(self._loss_aggregator / self._steps_done)
+        self._init()
 
     def plot(self):
         fig, axs = plt.subplots(

@@ -44,20 +44,14 @@ class BSScheduler(abc.ABC):
 class ConstantBS(BSScheduler):
 
     def __call__(self):
+        if not hasattr(self.agent, 'buffer'):
+            raise RuntimeError
         # batch
         if self.start_bs == -1:
-            if not hasattr(self.agent, 'buffer'):
-                raise RuntimeError
             self.curr_bs = len(getattr(self.agent, 'buffer'))
-        # stochastic
-        elif self.start_bs == 1:
-            pass
         # minibatch
         else:
-            if not hasattr(self.agent, 'buffer'):
-                raise RuntimeError
-            self.curr_bs = len(getattr(self.agent, 'buffer'))
-            self.curr_bs = min(self.start_bs, self.curr_bs)
+            self.curr_bs = min(self.start_bs, len(getattr(self.agent, 'buffer')))
 
 
 class LinearBS(BSScheduler):

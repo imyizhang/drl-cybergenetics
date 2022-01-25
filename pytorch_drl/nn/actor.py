@@ -42,7 +42,7 @@ class DummyActor(BaseActor):
         raise RuntimeError
 
 
-class ConstantActor(DummyActor):
+class ContinuousConstantActor(DummyActor):
 
     def __init__(self, action_dim, value=None):
         super().__init__()
@@ -53,7 +53,7 @@ class ConstantActor(DummyActor):
         return self.action.to(device=state.device)
 
 
-class RandomActor(DummyActor):
+class ContinuousRandomActor(DummyActor):
 
     def __init__(self, action_dim):
         super().__init__()
@@ -65,7 +65,7 @@ class RandomActor(DummyActor):
         return action.to(device=state.device)
 
 
-class DiscreteConstantActor(DummyActor):
+class ConstantActor(DummyActor):
 
     def __init__(self, action_dim, value=None):
         super().__init__()
@@ -80,7 +80,7 @@ class DiscreteConstantActor(DummyActor):
         return self.action.to(device=state.device)
 
 
-class DiscreteRandomActor(DummyActor):
+class RandomActor(DummyActor):
 
     def __init__(self, action_dim):
         super().__init__()
