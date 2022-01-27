@@ -439,7 +439,7 @@ class CRN(Env):
         reward = np.array(_rewards)
 
         # plot colors
-        c_R, c_P, c_G = ['tab:red', 'purple', 'green']
+        c_R, c_P, c_G = [(199/255, 64/255, 135/255), (48/255, 57/255, 171/255), (62/255, 129/255, 44/255)]
         c_U = 'tab:blue'
         c_reward = 'tab:orange'
         # experimental observation, partially shown
