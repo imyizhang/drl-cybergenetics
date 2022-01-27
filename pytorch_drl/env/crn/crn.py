@@ -28,9 +28,9 @@ k_m = 0.0116
 b_r = 0.0965
 
 class CRN(Env):
-    """A dynamical fold-change model with discrete action space (u), which describes
-    the evolution of the species (s) over their initial conditions in the un-induced
-    system:
+    """A dynamical fold-change model with an additional steady-state fold change (u),
+    which describes the evolution of the species (s) over their initial conditions
+    in the un-induced system:
 
         ds / dt = A_c @ s + B_c @ a
 
@@ -59,7 +59,8 @@ class CRN(Env):
         b_r = 0.0965
 
     and assuming that the system is at the un-induced steady-state (u = 0) at t = 0,
-    the initial condition of this system is R = P = G = 1.
+    the initial condition of this system is R = P = G = 1, the additional steady-state
+    fold change u = f(U), which a given light intensity, U, can achieve.
 
     Reference:
         [1] https://www.nature.com/articles/ncomms12546.pdf
@@ -74,6 +75,7 @@ class CRN(Env):
         system_noise: float = 1e-3,
         theta: list = [d_r, d_p, k_m, b_r],
         light_intensity: float = 1,
+        percentage_thres: float = 30,
         observation_mode: str = 'partially_observed',
         extra_info: bool = False,
     ) -> None:
@@ -99,6 +101,8 @@ class CRN(Env):
                               [0.0, 0.0]])
         # light intensity for further developing
         self._light_intensity = light_intensity
+        # percentage threshold, maximal U
+        self._percentage_thres = percentage_thres
         # observation mode, either noise corrupted G or perfect R, P, G would be observed by an agent
         self._observation_mode = observation_mode
         # whether observed state includes extra info about tracking reference
@@ -276,7 +280,8 @@ class CRN(Env):
         self._actions_taken.append(action_taken)
 
         # state
-        u = 5.134 / (1 + 5.411 * np.exp(-0.0698 * action_taken * 100)) + 0.1992 - 1  # dose-response characterization, u = f(U), U(0) = 0 should yield u(0) = 0
+        U = action_taken * self._percentage_thres  # light intensity (%), U
+        u = self.dose_response(U)  # steady-state fold change, u = f(U)
         delta = 0.1  # system dynamics simulation sampling rate
         sol = solve_ivp(
             self._func,
@@ -322,6 +327,14 @@ class CRN(Env):
             return observation, reward, done, info
         # perfect R, P, G observed
         return state, reward, done, info
+
+    @staticmethod
+    def dose_response(U):
+        """Dose-response characterization of the system (the relation between
+        constantly applied light intensity (%) and steady-state). Note that
+        U = 0 should yield u = 0 at t = 0.        
+        """
+        return 5.134 / (1 + 5.411 * np.exp(-0.0698 * U)) + 0.1992 - 1
 
     def _func(self, t: float, y: np.ndarray, u: float) -> np.ndarray:
         a = np.array([1.0, u])
@@ -420,8 +433,8 @@ class CRN(Env):
         t_U = np.concatenate([
             np.arange(self._T_s * i, self._T_s * (i + 1) + 1) for i in range(_steps_done)
         ])
-        U = np.array(_actions).repeat(self._T_s + 1) * 100
-        U_applied = np.array(_actions_taken).repeat(self._T_s + 1) * 100
+        U = np.array(_actions).repeat(self._T_s + 1) * self._percentage_thres
+        U_applied = np.array(_actions_taken).repeat(self._T_s + 1) * self._percentage_thres
         # reward
         reward = np.array(_rewards)
 
