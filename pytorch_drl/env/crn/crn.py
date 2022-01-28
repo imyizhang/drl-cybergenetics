@@ -332,7 +332,7 @@ class CRN(Env):
     def dose_response(U):
         """Dose-response characterization of the system (the relation between
         constantly applied light intensity (%) and steady-state). Note that
-        U = 0 should yield u = 0 at t = 0.        
+        U = 0 should yield u = 0 at t = 0.
         """
         return 5.134 / (1 + 5.411 * np.exp(-0.0698 * U)) + 0.1992 - 1
 
@@ -362,8 +362,12 @@ class CRN(Env):
             reward -= absolute_error
         elif func == 'negative_logae':
             reward -= np.log(absolute_error)
-        elif func == 'negative_expae':
-            reward -= np.exp(absolute_error)
+        elif func == 'exp_nse':
+            reward = np.exp(-absolute_error)
+        elif func == 'inverse_se':
+            reward = 1.0 / absolute_error
+        elif func == 'exp_nae':
+            reward = np.exp(-absolute_error)
         elif func == 'inverse_ae':
             reward = 1.0 / absolute_error
         elif func == 'negative_re':
@@ -500,6 +504,8 @@ class CRN(Env):
             axs[1, 1].set_xlabel('Time (min)')
             axs[1, 1].set_ylabel('reward')
             plt.show()
+            if replay:
+                fig.savefig('runs/dashboard.png')
 
     def close(self) -> None:
         self._init()

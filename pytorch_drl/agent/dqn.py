@@ -141,7 +141,7 @@ class DDQNAgent(DQNAgent):
     def act(self, state):
         with torch.no_grad():
             Q_distribution = self.critic(state)
-        # explore, epsilon-greedy policy
+        # explore, Boltzmann exploration
         eps = random.random()
         if eps < self.eps_threshold:
             action_probabilities = torch.nn.functional.softmax(Q_distribution, dim=1)

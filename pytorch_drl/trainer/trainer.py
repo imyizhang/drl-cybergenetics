@@ -4,7 +4,7 @@
 import abc
 import itertools
 
-from ..utils import EpisodicLogger
+from ..utils import EpisodicLogger, replay
 
 
 class Trainer(abc.ABC):
@@ -45,8 +45,10 @@ class OffPolicyTrainer(Trainer):
         self.bs_scheduler = bs_scheduler
         self.er_scheduler = er_scheduler
         self.logger = EpisodicLogger()
+        self.reward_func = None
 
     def __call__(self, reward_func):
+        self.reward_func = reward_func
         # set the agent in training mode
         self.agent.train()
         for episode in range(self.n_episodes):
@@ -61,7 +63,7 @@ class OffPolicyTrainer(Trainer):
                 if self.er_scheduler is not None:
                     self.er_scheduler.step()
                 # perform the action and observe new state
-                next_state, reward, done, info = self.env.step(action, reward_func=reward_func)
+                next_state, reward, done, info = self.env.step(action, reward_func=self.reward_func)
                 # buffer the experience
                 if self.agent.buffer is not None:
                     self.agent.cache(state, action, reward, done, next_state)
@@ -79,5 +81,30 @@ class OffPolicyTrainer(Trainer):
                     break
             # episode logging
             self.logger.episode()
+        # TODO
         self.env.close()
         return self.logger
+
+    def evaluate(self):
+        # initialize the env and state
+        state = self.env.reset()
+        # episode training
+        timesteps = itertools.count() if self.n_timesteps is None else range(self.n_timesteps)
+        for step in timesteps:
+            # select an action
+            action = self.agent.act(state)
+            # perform the action and observe new state
+            next_state, reward, done, info = self.env.step(action, reward_func=self.reward_func)
+            # update the state
+            state = next_state
+            # step logging
+            self.logger.step(reward, info, None)
+            # check if end
+            if done:
+                break
+        # episode logging
+        self.logger.episode()
+        # TODO
+        self.env.close()
+        # replay
+        replay(self.env, self.logger, episode=-1)
