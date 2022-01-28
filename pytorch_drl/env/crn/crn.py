@@ -232,6 +232,16 @@ class CRN(Env):
         return int(self._in_tolerance)
 
     @property
+    def count_in_tolerance(self) -> typing.Optional[int]:
+        """Count of the occurrence that perfect G which tracks the reference
+        falls in tolerance.
+        """
+        if self._trajectory:
+            G =  self._trajectory[self._steps_done][[2]]
+            return int( (abs(G - self._ref) / self._ref < self.ref_trajectory.tolerance) )
+        return None
+
+    @property
     def _state_in_tolerance(self) -> typing.Optional[np.ndarray]:
         """Whether current G which tracks the reference falls in tolerance.
 
@@ -288,8 +298,7 @@ class CRN(Env):
             (0, self._T_s + delta),
             self._trajectory[self._steps_done],
             t_eval=np.arange(0, self._T_s + delta, delta),
-            args=(action_taken,),
-            #args=(u,),
+            args=(u,),
         )  # system dynamics simulation
         state = sol.y[:, -1]
         state += self._rng.normal(0.0, self._system_noise)  # system noise simulation
@@ -318,7 +327,7 @@ class CRN(Env):
             'action_taken': action_taken,
             'state': state,
             'observation': observation,
-            'count_in_tolerance': self._count_in_tolerance,
+            'count_in_tolerance': self.count_in_tolerance,
         }
 
         # what if returned state containing tracking info?
