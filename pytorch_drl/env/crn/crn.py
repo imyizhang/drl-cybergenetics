@@ -298,11 +298,11 @@ class CRN(Env):
             (0, self._T_s + delta),
             self._trajectory[self._steps_done],
             t_eval=np.arange(0, self._T_s + delta, delta),
-            args=(u,),
+            args=(u, self._system_noise,),
         )  # system dynamics simulation
         state = sol.y[:, -1]
-        state += self._rng.normal(0.0, self._system_noise)  # system noise simulation
-        state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
+        #state += self._rng.normal(0.0, self._system_noise, size=3)  # system noise simulation
+        #state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
         self._trajectory.append(state)
 
         # noise corrupted G
@@ -345,7 +345,9 @@ class CRN(Env):
         """
         return 5.134 / (1 + 5.411 * np.exp(-0.0698 * U)) + 0.1992 - 1
 
-    def _func(self, t: float, y: np.ndarray, u: float) -> np.ndarray:
+    def _func(self, t: float, y: np.ndarray, u: float, noise: float) -> np.ndarray:
+        y += self._rng.normal(0.0, self._system_noise, size=3)  # system noise simulation
+        y = np.clip(y, 0.0, np.inf)  # clip to [0, inf)
         a = np.array([1.0, u])
         return self._A_c @ y + self._B_c @ a
 
