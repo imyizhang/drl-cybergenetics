@@ -22,10 +22,16 @@ def make(cls: str, **kwargs):
 
 
 # default nominal parameters
-d_r = 0.0956
-d_p = 0.0214
-k_m = 0.0116
-b_r = 0.0965
+TF_total = 2000
+k_on = 0.0016399
+k_off = 0.34393
+k_basal = 0.02612
+k_max = 13.588
+K_d = 956.75
+n_hill = 4.203
+k_degR = 0.042116
+k_trans = 1.4514
+k_degP = 0.007
 
 class CRN(Env):
     """A dynamical fold-change model with an additional steady-state fold change (u),
@@ -63,7 +69,7 @@ class CRN(Env):
     fold change u = f(U), which a given light intensity, U, can achieve.
 
     Reference:
-        [1] https://www.nature.com/articles/ncomms12546.pdf
+        [1] https://www.nature.com/articles/s41467-018-05882-2.pdf
     """
 
     def __init__(
