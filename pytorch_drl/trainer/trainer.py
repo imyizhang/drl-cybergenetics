@@ -47,7 +47,7 @@ class OffPolicyTrainer(Trainer):
         self.logger = EpisodicLogger()
         self.reward_func = None
 
-    def __call__(self, reward_func):
+    def __call__(self, reward_func, **func_kwargs):
         self.reward_func = reward_func
         # set the agent in training mode
         self.agent.train()
@@ -63,7 +63,7 @@ class OffPolicyTrainer(Trainer):
                 if self.er_scheduler is not None:
                     self.er_scheduler.step()
                 # perform the action and observe new state
-                next_state, reward, done, info = self.env.step(action, reward_func=self.reward_func)
+                next_state, reward, done, info = self.env.step(action, reward_func=self.reward_func, **func_kwargs)
                 # buffer the experience
                 if self.agent.buffer is not None:
                     self.agent.cache(state, action, reward, done, next_state)

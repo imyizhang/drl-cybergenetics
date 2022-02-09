@@ -121,16 +121,16 @@ class CRN(Env):
         self._observations = []
         # rewards measuring the distance between perfect G and reference trajectory
         self._rewards = []
-        # previous reward
-        self._prev_reward = None
         # steps done
         self._steps_done = 0
+        # previously achieved
+        self._prev_achieved = None
 
     @property
     def state(self) -> typing.Optional[np.ndarray]:
         """Current state, which can be partially or fully observed."""
         if self._extra_info and (self._state is not None):
-            return np.concatenate((self._state, self._state_in_tolerance,), axis=None)
+            return np.concatenate((self._state, self.state_in_tolerance,), axis=None)
         return self._state
 
     @property
@@ -177,7 +177,7 @@ class CRN(Env):
     def reset(self) -> np.ndarray:
         if self._extra_info:
             state = self._reset()
-            return np.concatenate((state, self._state_in_tolerance,), axis=None)
+            return np.concatenate((state, self.state_in_tolerance,), axis=None)
         return self._reset()
 
     def _reset(self) -> np.ndarray:
@@ -242,7 +242,7 @@ class CRN(Env):
         return None
 
     @property
-    def _state_in_tolerance(self) -> typing.Optional[np.ndarray]:
+    def state_in_tolerance(self) -> typing.Optional[np.ndarray]:
         """Whether current G which tracks the reference falls in tolerance.
 
             above tolerance: +1
@@ -262,16 +262,18 @@ class CRN(Env):
         self,
         action: typing.Union[float, np.ndarray],
         reward_func: str,
+        **func_kwargs,
     ):
         if self._extra_info:
             state, reward, done, info = self._step(action, reward_func)
-            return np.concatenate((state, self._state_in_tolerance,), axis=None), reward, done, info
-        return self._step(action, reward_func)
+            return np.concatenate((state, self.state_in_tolerance,), axis=None), reward, done, info
+        return self._step(action, reward_func, **func_kwargs,)
 
     def _step(
         self,
         action: typing.Union[float, np.ndarray],
         reward_func: str,
+        **func_kwargs,
     ):
         # reset first
         if self.state is None:
@@ -290,19 +292,7 @@ class CRN(Env):
         self._actions_taken.append(action_taken)
 
         # state
-        U = action_taken * self._percentage_thres  # light intensity (%), U
-        u = self.dose_response(U)  # steady-state fold change, u = f(U)
-        delta = 0.1  # system dynamics simulation sampling rate
-        sol = solve_ivp(
-            self._func,
-            (0, self._T_s + delta),
-            self._trajectory[self._steps_done],
-            t_eval=np.arange(0, self._T_s + delta, delta),
-            args=(u, self._system_noise,),
-        )  # system dynamics simulation
-        state = sol.y[:, -1]
-        #state += self._rng.normal(0.0, self._system_noise, size=3)  # system noise simulation
-        #state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
+        state = self._dynamics_simulate(action_taken)
         self._trajectory.append(state)
 
         # noise corrupted G
@@ -311,11 +301,14 @@ class CRN(Env):
         observation = np.clip(observation, 0.0, np.inf)  # clip to [0, inf)
         self._observations.append(observation)
 
+        # previously achieved
+        self._prev_achieved = self._G[0]
+
         # step
         self._steps_done += 1
 
         # reward
-        reward = self._compute_reward(self._G[0], self._ref[0], reward_func)
+        reward = self._compute_reward(self._G[0], self._ref[0], reward_func, **func_kwargs,)
         self._rewards.append(reward)
 
         # done
@@ -337,66 +330,75 @@ class CRN(Env):
         # perfect R, P, G observed
         return state, reward, done, info
 
+    def _dynamics_simulate(self, action):
+        """Given s(t), compute s(t + T_s) with ODEs: ds / dt = A_c @ s + B_c @ a + eps,
+        where eps is system additive white noise."""
+        U = action * self._percentage_thres  # light intensity (%), U = action * U_max
+        u = self.dose_response(U)  # steady-state fold change, u = f(U)
+        delta = 0.1  # dynamics simulation sampling rate
+        sol = solve_ivp(
+            self._func,
+            (0, self._T_s + delta),
+            self._trajectory[self._steps_done],
+            t_eval=np.arange(0, self._T_s + delta, delta),
+            args=(u, self._system_noise,),
+        )  # dynamics simulation
+        state = sol.y[:, -1]  # ODEs solution
+        state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
+        return state
+
+    def _func(self, t: float, y: np.ndarray, u: float, noise: float) -> np.ndarray:
+        a = np.array([1.0, u])
+        return self._A_c @ y + self._B_c @ a + self._rng.normal(0.0, self._system_noise)
+
     @staticmethod
-    def dose_response(U):
+    def dose_response(U: typing.Union[np.ndarray, float]):
         """Dose-response characterization of the system (the relation between
         constantly applied light intensity (%) and steady-state). Note that
         U = 0 should yield u = 0 at t = 0.
         """
         return 5.134 / (1 + 5.411 * np.exp(-0.0698 * U)) + 0.1992 - 1
 
-    def _func(self, t: float, y: np.ndarray, u: float, noise: float) -> np.ndarray:
-        y += self._rng.normal(0.0, self._system_noise, size=3)  # system noise simulation
-        y = np.clip(y, 0.0, np.inf)  # clip to [0, inf)
-        a = np.array([1.0, u])
-        return self._A_c @ y + self._B_c @ a
-
     def _compute_reward(
         self,
         achieved_goal: float,
         desired_goal: float,
         func: str,
+        p: float = 1,
+        scale: float = 1,
     ) -> float:
-        absolute_error = abs(desired_goal - achieved_goal)
-        relative_error = absolute_error / desired_goal
-        squared_error = absolute_error ** 2
+        abs_error = abs(desired_goal - achieved_goal)
+        relative_error = abs_error / desired_goal
         abs_logarithmic_error = abs(np.log(desired_goal + 1) - np.log(achieved_goal + 1))
-        squared_logarithmic_error = (abs_logarithmic_error) ** 2
+        inverse_error = 1.0 / abs_error
         reward = 0.0
-        if func == 'negative_se':
-            reward -= squared_error
-        elif func == 'negative_sle':
-            reward -= squared_logarithmic_error
-        elif func == 'negative_ale':
-            reward -= absolute_logarithmic_error
-        elif func == 'negative_ae':
-            reward -= absolute_error
-        elif func == 'negative_logae':
-            reward -= np.log(absolute_error)
-        elif func == 'exp_nse':
-            reward = np.exp(-absolute_error)
-        elif func == 'inverse_se':
-            reward = 1.0 / absolute_error
-        elif func == 'exp_nae':
-            reward = np.exp(-absolute_error)
-        elif func == 'inverse_ae':
-            reward = 1.0 / absolute_error
-        elif func == 'negative_re':
-            reward -= relative_error
-        elif func == 'negative_sqrtre':
-            reward -= relative_error ** 0.5
+        if func == 'neg_error':
+            reward = -abs_error ** p
+        elif func == 'neg_relative_error':
+            reward = -relative_error ** p
+        elif func == 'neg_logarithmic_error':
+            reward = -abs_logarithmic_error ** p
+        elif func == 'inverse_error':
+            reward = inverse_error ** p
+        elif func == 'log_scaled_error':
+            reward = -np.log(relative_error / self.ref_trajectory.tolerance)
+        elif func == 'cauchy_error':
+            reward = 1.0  / (1.0 + (abs_error / scale) ** p)
+        elif func == 'gaussian_error':
+            reward = np.exp(-(abs_error / scale) ** p)
         elif func == 'in_tolerance':
-            reward = 1.0 if self._in_tolerance else 0.0
-        elif func == 'scaled_se':
-            reward = -squared_error * 100 + self._count_in_tolerance * 10
-        elif func == 'scaled_sle':
-            reward = -squared_logarithmic_error * 100 + self._count_in_tolerance * 10
-        elif func == 'complex':
-            error = -squared_error * 100 + self._count_in_tolerance * 10
-            if self._prev_reward is not None:
-                reward = error - self._prev_reward
-            self._prev_reward = error
-            reward -= relative_error ** 0.5
+            reward = self._count_in_tolerance
+        elif func == 'scaled_error':
+            reward = -abs_error ** p * 100 + self._count_in_tolerance * 10
+        elif func == 'scaled_logarithmic_error':
+            reward = -abs_logarithmic_error ** p * 100 + self._count_in_tolerance * 10
+        elif func == 'conditional_scaled_error':
+            reward = -abs_error ** p * 100 + self._count_in_tolerance * 10
+            if not self._in_tolerance:
+                if achieved_goal > desired_goal and achieved_goal > self._prev_achieved:
+                    reward -= 10
+                elif achieved_goal < desired_goal and achieved_goal < self._prev_achieved:
+                    reward -= 10
         else:
             raise RuntimeError
         return reward
