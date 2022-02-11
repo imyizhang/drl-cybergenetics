@@ -10,11 +10,7 @@ import numpy as np
 class RefTrajectory(abc.ABC):
     """Time-varying reference trajectories to track."""
 
-    def __init__(
-        self,
-        scale: float = 1.5,
-        tolerance: float = 0.05,
-    ) -> None:
+    def __init__(self, scale: float = 1.5, tolerance: float = 0.05) -> None:
         self.scale = scale
         self.tolerance = tolerance
         self._ref_trajectory = None

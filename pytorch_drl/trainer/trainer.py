@@ -85,7 +85,7 @@ class OffPolicyTrainer(Trainer):
         self.env.close()
         return self.logger
 
-    def evaluate(self):
+    def evaluate(self, saveto=None):
         # initialize the env and state
         state = self.env.reset()
         # episode training
@@ -107,4 +107,4 @@ class OffPolicyTrainer(Trainer):
         # TODO
         self.env.close()
         # replay
-        replay(self.env, self.logger, episode=-1)
+        return replay(self.env, self.logger, episode=-1)

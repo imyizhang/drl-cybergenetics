@@ -1,13 +1,28 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import pickle
+
 import matplotlib.pyplot as plt
+
+
+class Cache(dict):
+
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError("'Cache' object has no attribute '%s'" % key)
+
+    def __setattr__(self, key, value):
+        self[key] = value
 
 
 class EpisodicLogger:
 
     def __init__(self):
         # for replay
+        self.episodic_cache = []
         self.episodic_actions = []
         self.episodic_actions_taken = []
         self.episodic_trajectory = []
@@ -21,6 +36,10 @@ class EpisodicLogger:
         self.episodic_return = []
         # initialize
         self._init()
+
+    @property
+    def cache(self):
+        return self.episodic_cache
 
     @property
     def actions(self):
@@ -95,12 +114,42 @@ class EpisodicLogger:
         self.episodic_observations.append(self._observations)
         self.episodic_rewards.append(self._rewards)
         self.episodic_duration.append(self._steps_done)
+        cache = Cache()
+        cache.trajectory = self._trajectory
+        cache.observations = self._observations
+        cache.actions = self._actions
+        cache.actions_taken = self._actions_taken
+        cache.rewards = self._rewards
+        cache.steps_done = self._steps_done
+        self.episodic_cache.append(cache)
         # for evaluation
         self.episodic_counts_in_tolerance.append(self._counts_in_tolerance)
         self.episodic_loss.append(self._loss)
         self.episodic_Q.append(self._Q)
         # initialize
         self._init()
+
+    def save(self, file):
+        _logger = {
+            'cache': self.cache,
+            'reward':  self.reward,
+            'tolerance': self.tolerance,
+            'loss': self.loss,
+            'Q': self.Q,
+        }
+        with open(file, 'wb') as f:
+             pickle.dump(_logger, f)
+
+    def load(self, file):
+        with open(file, 'rb') as f:
+             _logger = pickle.load(f)
+        self.episodic_cache = _logger['cache']
+        # for evaluation
+        self.episodic_reward = _logger['reward']
+        self.episodic_aggregator_in_tolerance = _logger['tolerance']
+        self.episodic_loss = _logger['loss']
+        self.episodic_Q = _logger['Q']
+        return self
 
     def plot(self):
         fig, axs = plt.subplots(
