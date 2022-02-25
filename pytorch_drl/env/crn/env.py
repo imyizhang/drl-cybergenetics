@@ -21,7 +21,7 @@ class Env(abc.ABC):
 
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._rng = np.random.RandomState(seed=None)
 
     @abc.abstractmethod
@@ -36,10 +36,10 @@ class Env(abc.ABC):
     def render(self):
         raise NotImplementedError
 
-    def close(self):
+    def close(self) -> None:
         pass
 
-    def seed(self, seed: typing.Optional[int] = None):
+    def seed(self, seed: typing.Optional[int] = None) -> None:
         self._rng.seed(seed)
 
     @property

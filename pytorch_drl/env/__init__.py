@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from .crn import *
-from .crn_env import CRNEnv
+from .wrappers import CRNEnv
+
 
 __all__ = ('CRNEnv')

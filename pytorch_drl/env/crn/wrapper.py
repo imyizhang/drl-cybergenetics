@@ -11,8 +11,11 @@ from .env import Env
 class Wrapper(Env):
     """A wrapper of an environment to allow modular transformation."""
 
-    def __init__(self, env: Env):
+    def __init__(self, env: Env) -> None:
         self.env = env
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
     def reset(self):
         return self.env.reset()
@@ -23,12 +26,12 @@ class Wrapper(Env):
     def render(self, **kwargs):
         return self.env.render(**kwargs)
 
-    def close(self):
+    def close(self) -> None:
         return self.env.close()
 
-    def seed(self, seed: typing.Optional[int] = None):
+    def seed(self, seed: typing.Optional[int] = None) -> None:
         return self.env.seed(seed=seed)
 
     @property
-    def unwrapped(self):
+    def unwrapped(self) -> Env:
         return self.env.unwrapped

@@ -15,9 +15,6 @@ class DynSimulator(abc.ABC):
         self.theta = theta
         self._rng = np.random.RandomState(seed=None)
 
-    def seed(self, seed: typing.Optional[int] = None):
-        self._rng.seed(seed)
-
     @property
     def init(self) -> None:
         """Initial y(0)."""
@@ -34,6 +31,9 @@ class DynSimulator(abc.ABC):
 
     def __repr__(self) -> str:
         return self.__class__.__name__ + '()'
+
+    def seed(self, seed: typing.Optional[int] = None) -> None:
+        self._rng.seed(seed)
 
 
 # default parameters
@@ -101,34 +101,31 @@ class EcoliDynSimulator(DynSimulator):
         ])
         self.intensity_thres = intensity_thres
         self.percentage_thres = percentage_thres
+        # default parameters
+        self.action_min = 0.0
+        self.action_max = 1.0
+        self.state_min = 0.0
+        self.state_max = np.inf
+        self.state_shape = (3,)
+        self.state_dtype = np.float32
+        self.dim_observed = -1
+        self.state_labels = ['R', 'P', 'G']
+        self.state_colors = ['tab:red', 'tab:purple', 'tab:green']
 
     @property
     def init(self) -> np.ndarray:
-        return np.ones((3,))
+        return np.ones(self.state_shape, dtype=self.state_dtype)
 
-    @property
-    def state_dim(self) -> int:
-        return 3
-
-    @property
-    def dim_observed(self) -> int:
-        return -1
-
-    @property
-    def state_colors(self) -> list:
-        return ['tab:red', 'tab:purple', 'tab:green']
-
-    @property
-    def state_labels(self) -> list:
-        return ['R', 'P', 'G']
-
-    def odes(self, t: float, y: np.ndarray, u: float, eps: float) -> np.ndarray:
+    def odes(self, t: float, y: np.ndarray, u: float, noise: float) -> np.ndarray:
         a = np.array([1.0, u])
         # ODEs
-        dydt = self._A_c @ y + self._B_c @ a + self._rng.normal(0.0, eps)
-        return dydt
+        dydt = self._A_c @ y + self._B_c @ a
+        # epsilon
+        eps = self._rng.normal(0.0, noise)
+        return dydt + eps
 
-    def __call__(self, y_t: np.ndarray, T_s: float, action: float, eps: float) -> np.ndarray:
+    def __call__(self, y_t: np.ndarray, T_s: float, action: float, noise: float) -> np.ndarray:
+        assert action >= self.action_min and action <= self.action_max
         U = action * self.percentage_thres * self.intensity_thres  # intensity (%)
         u = self.dose_response(U)  # steady-state fold change, u = f(U)
         delta = 0.1  # dynamics simulation sampling rate
@@ -137,14 +134,14 @@ class EcoliDynSimulator(DynSimulator):
             (0, T_s + delta),
             y_t,
             t_eval=np.arange(0, T_s + delta, delta),
-            args=(u, eps,),
+            args=(u, noise,),
         )  # dynamics simulation
         state = sol.y[:, -1]  # ODEs solution
-        state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
-        return state
+        state = np.clip(state, self.state_min, self.state_max)  # clip
+        return state.astype(self.state_dtype)
 
     @staticmethod
-    def dose_response(U: typing.Union[np.ndarray, float]):
+    def dose_response(U: typing.Union[np.ndarray, float]) -> typing.Union[np.ndarray, float]:
         """Dose-response characterization of the system (the relation between
         constantly applied light intensity (%) and steady-state). Note that
         U = 0 should yield u = 0 at t = 0.
@@ -208,6 +205,16 @@ class YeastDynSimulator(DynSimulator):
         self._k_degP = self.theta
         self.intensity_thres = intensity_thres
         self.percentage_thres = percentage_thres
+        # default parameters
+        self.action_min = 0.0
+        self.action_max = 1.0
+        self.state_min = 0.0
+        self.state_max = np.inf
+        self.state_shape = (3,)
+        self.state_dtype = np.float32
+        self.dim_observed = -1
+        self.state_labels = ['TF_on', 'mRNA', 'Protein']
+        self.state_colors = ['tab:red', 'tab:purple', 'tab:green']
 
     @property
     def init(self) -> np.ndarray:
@@ -215,33 +222,20 @@ class YeastDynSimulator(DynSimulator):
             0.0,
             self._k_basal / self._k_degR,
             (self._k_trans * self._k_basal) / (self._k_degP * self._k_degR),
-        ])
+        ], dtype=self.state_dtype)
 
-    @property
-    def state_dim(self) -> int:
-        return 3
-
-    @property
-    def dim_observed(self) -> int:
-        return -1
-
-    @property
-    def state_colors(self) -> list:
-        return ['tab:red', 'tab:purple', 'tab:green']
-
-    @property
-    def state_labels(self) -> list:
-        return ['TF_on', 'mRNA', 'Protein']
-
-    def odes(self, t: float, y: np.ndarray, I: float, eps: float) -> np.ndarray:
+    def odes(self, t: float, y: np.ndarray, I: float, noise: float) -> np.ndarray:
         TF_on, mRNA, Protein = y
         # ODEs
         dTF_ondt = I * self._k_on * (self._TF_tot - TF_on) - self._k_off * TF_on
         dmRNAdt = self._k_basal + self._k_max * (TF_on ** self._n) / (self._K_d ** self._n + TF_on ** self._n) - self._k_degR * mRNA
         dProteindt = self._k_trans * mRNA - self._k_degP * Protein
-        return np.array([dTF_ondt, dmRNAdt, dProteindt])
+        # epsilon
+        eps = self._rng.normal(0.0, noise)
+        return np.array([dTF_ondt, dmRNAdt, dProteindt]) + eps
 
-    def __call__(self, y_t: np.ndarray, T_s:float, action:float, eps:float) -> np.ndarray:
+    def __call__(self, y_t: np.ndarray, T_s:float, action:float, noise:float) -> np.ndarray:
+        assert action >= self.action_min and action <= self.action_max
         I = action * self.percentage_thres / 100 * self.intensity_thres  # intensity
         delta = 0.1  # dynamics simulation sampling rate
         sol = sp.integrate.solve_ivp(
@@ -249,8 +243,8 @@ class YeastDynSimulator(DynSimulator):
             (0, T_s + delta),
             y_t,
             t_eval=np.arange(0, T_s + delta, delta),
-            args=(I, eps,),
+            args=(I, noise,),
         )  # dynamics simulation
         state = sol.y[:, -1]  # ODEs solution
-        state = np.clip(state, 0.0, np.inf)  # clip to [0, inf)
-        return state
+        state = np.clip(state, self.state_min, self.state_max)  # clip
+        return state.astype(self.state_dtype)

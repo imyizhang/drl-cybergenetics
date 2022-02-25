@@ -73,7 +73,7 @@ class DDPGAgent(Agent):
         if self.curr_step % self.learn_every != 0:
             return None
         # it's time to learn
-        actor_loss, critic_loss = None, None
+        actor_objective, critic_objective = None, None
         # sample a random minibatch of transitions from experience replay buffer
         state, action, reward, done, next_state = self.recall()
         # Q learning side of DDPG
@@ -85,19 +85,19 @@ class DDPGAgent(Agent):
             # compute expected Q(s, a) = r(s, a) + gamma * max_{a'} Q(s', a')
             Q_target = reward + self.gamma * next_Q
         # update critic by minimizing the loss of TD error
-        critic_loss = self.critic_criterion(Q, Q_target)
-        self._update_nn(self.critic_optim, critic_loss)
+        critic_objective = self.critic_criterion(Q, Q_target)
+        self._update_nn(self.critic_optim, critic_objective)
         # policy learning side of DDPG
         # update actor using the sampled policy gradient
-        actor_loss = -self.critic(state, self.actor(state)).mean()
-        self._update_nn(self.actor_optim, actor_loss)
+        actor_objective = -self.critic(state, self.actor(state)).mean()
+        self._update_nn(self.actor_optim, actor_objective)
         # sync weights of target networks every `sync_every` steps
         if self.curr_step % self.sync_every == 0:
             self._sync_weights(self.critic_target, self.critic, soft_updating=True, tau=self.tau)
             self._sync_weights(self.actor_target, self.actor, soft_updating=True, tau=self.tau)
         return {
-            'loss/actor': actor_loss,
-            'loss/critic': critic_loss,
+            'objective/actor': actor_objective,
+            'objective/critic': critic_objective,
             'Q': Q.mean(),
         }
 
@@ -161,7 +161,7 @@ class TD3Agent(DDPGAgent):
         if self.curr_step % self.learn_every != 0:
             return None
         # it's time to learn
-        actor_loss, critic_loss = None, None
+        actor_objective, critic_objective = None, None
         # sample a random minibatch of transitions from experience replay buffer
         state, action, reward, done, next_state = self.recall()
         # Q learning side of DDPG
@@ -175,20 +175,20 @@ class TD3Agent(DDPGAgent):
             # compute expected Q(s, a) = r(s, a) + gamma * max_{a'} Q(s', a')
             Q_target = reward + self.gamma * next_Q
         # update critic by minimizing sum of loss of TD error
-        critic_loss = self.critic_criterion(Q1, Q_target) + self.critic_criterion(Q2, Q_target)
-        self._update_nn(self.critic_optim, critic_loss)
+        critic_objective = self.critic_criterion(Q1, Q_target) + self.critic_criterion(Q2, Q_target)
+        self._update_nn(self.critic_optim, critic_objective)
         # policy learning side of DDPG
         # update actor by maximizing E[Q_{1}(s, pi(s))]
-        actor_loss = -self.critic(state, self.actor(state)).mean()
+        actor_objective = -self.critic(state, self.actor(state)).mean()
         # in TD3, actor is updated less frequently than twin critics are, originally, `update_every` is equivalent to `sync_every`
         if self.curr_step % self.update_every == 0:
-            self._update_nn(self.actor_optim, actor_loss)
+            self._update_nn(self.actor_optim, actor_objective)
         # sync weights of target networks every `sync_every` steps
         if self.curr_step % self.sync_every == 0:
             self._sync_weights(self.critic_target, self.critic, soft_updating=True, tau=self.tau)
             self._sync_weights(self.actor_target, self.actor, soft_updating=True, tau=self.tau)
         return {
-            'loss/actor': actor_loss,
-            'loss/critic': critic_loss,
+            'objective/actor': actor_objective,
+            'objective/critic': critic_objective,
             'Q': Q1.mean(),
         }
