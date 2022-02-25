@@ -200,7 +200,8 @@ class CRN(Env):
             fig.tight_layout()
             # subplot: reference trajectory with tolerance margins as time
             if np.isnan(ref_trajectory).any():
-                axs[0].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, fmt='o', color='grey')
+                axs[0].scatter(t_ref, ref_trajectory, color='grey')
+                axs[0].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
             else:
                 axs[0].plot(t_ref, ref_trajectory, '--', color='grey')
                 axs[0].fill_between(t_ref, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
@@ -225,6 +226,7 @@ class CRN(Env):
             fig.tight_layout()
             # subplot: reference trajectory with tolerance margins as time
             if np.isnan(ref_trajectory).any():
+                axs[0, 0].scatter(t_ref, ref_trajectory, color='grey')
                 axs[0, 0].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
             else:
                 axs[0, 0].plot(t_ref, ref_trajectory, '--', color='grey')
@@ -242,6 +244,7 @@ class CRN(Env):
             axs[1, 0].set_xlabel('Time (min)')
             # subplot: reference trajectory with tolerance margins as time
             if np.isnan(ref_trajectory).any():
+                axs[0, 1].scatter(t_ref, ref_trajectory, color='grey')
                 axs[0, 1].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
             else:
                 axs[0, 1].plot(t_ref, ref_trajectory, '--', color='grey')
