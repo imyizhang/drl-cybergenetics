@@ -6,6 +6,7 @@ import typing
 
 import numpy as np
 import scipy as sp
+import scipy.signal as signal
 
 
 class RefTrajectory(abc.ABC):
@@ -70,7 +71,7 @@ class SquareRefTrajectory(RefTrajectory):
 
     def __call__(self, t: np.ndarray):
         assert t.ndim == 1
-        self.ref_trajectory = self.scale + self.amplitude * sp.signal.square(2 * np.pi * t / self.period + self.phase).astype(t.dtype)  # dtype, the same as t
+        self.ref_trajectory = self.scale + self.amplitude * signal.square(2 * np.pi * t / self.period + self.phase).astype(t.dtype)  # dtype, the same as t
         return self.ref_trajectory, self.tolerance_margin
 
 

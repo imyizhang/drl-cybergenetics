@@ -154,6 +154,12 @@ class CRN(Env):
             reward = float(np.array(self._cache.aggregator_in_tolerance).mean())
         elif func == 'scaled_error':
             reward = -abs(achieved - desired) ** p * 100 + self._count_in_tolerance(achieved, desired) * 10
+        elif func == 'gaussian':
+            reward = float(
+                np.exp(
+                -(achieved - desired) ** 2 / self.ref_trajectory.tolerance ** 2
+                )
+            )
         else:
             raise RuntimeError
         return reward

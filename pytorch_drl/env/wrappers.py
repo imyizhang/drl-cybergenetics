@@ -17,6 +17,7 @@ class CRNEnv(Wrapper):
         time_aware=False,
         tolerance_aware=False,
         max_timesteps=None,
+        to_tensor=True,
         device=None,
         dtype=torch.float32,
         **kwargs,
@@ -30,7 +31,8 @@ class CRNEnv(Wrapper):
             env = ToleranceAwareObservation(env)
         if max_timesteps is not None:
             env = LimitedTimestep(env, max_timesteps)
-        env = ToTensor(env, device, dtype)
+        if to_tensor:
+            env = ToTensor(env, device, dtype)
         super().__init__(env)
 
 
@@ -150,7 +152,7 @@ class ToleranceAwareObservation(ObservationWrapper):
         desired, _ = self.env.ref_trajectory(self.env._cache.t[self.env._cache.steps_done])
         achieved, desired = float(achieved[0]), float(desired[0])
         # within tolerance: 1
-        if abs(achieved - desired) / desired < self.ref_trajectory.tolerance:
+        if abs(achieved - desired) / desired < self.env.ref_trajectory.tolerance:
             state_in_tolerance = np.array([1], dtype=self.env.observation_space.dtype)
         # below tolerance: 0
         elif achieved < desired :

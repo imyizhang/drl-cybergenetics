@@ -20,7 +20,7 @@ class BaseActor(torch.nn.Module):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def act(self, state, action_noise):
+    def act(self, state):
         # return action
         raise NotImplementedError
 
@@ -35,9 +35,6 @@ class BaseActor(torch.nn.Module):
 
 class DummyActor(BaseActor):
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, state):
         raise RuntimeError
 
@@ -46,11 +43,11 @@ class ContinuousConstantActor(DummyActor):
 
     def __init__(self, action_dim, value=None):
         super().__init__()
-        # continuous action space
+        # continuous action space, low: 0, high: 1
         self.action = torch.empty(size=(1, action_dim)).uniform_(0, 1) if value is None else torch.tensor([[value]])
 
     def act(self, state):
-        return self.action.to(device=state.device)
+        return self.action.to(device=state.device, dtype=state.dtype)
 
 
 class ContinuousRandomActor(DummyActor):
@@ -60,16 +57,16 @@ class ContinuousRandomActor(DummyActor):
         self.action_dim = action_dim
 
     def act(self, state):
-        # continuous action space
+        # continuous action space, low: 0, high: 1
         action = torch.empty(size=(1, self.action_dim)).uniform_(0, 1)
-        return action.to(device=state.device)
+        return action.to(device=state.device, dtype=state.dtype)
 
 
 class ConstantActor(DummyActor):
 
     def __init__(self, action_dim, value=None):
         super().__init__()
-        # discrete action space
+        # discrete action space, low: 0, high: action_dim
         self.action = torch.randint(
             low=0,
             high=action_dim,
@@ -77,7 +74,7 @@ class ConstantActor(DummyActor):
         ) if value is None else torch.tensor([[value]])
 
     def act(self, state):
-        return self.action.to(device=state.device)
+        return self.action.to(device=state.device, dtype=state.dtype)
 
 
 class RandomActor(DummyActor):
@@ -91,7 +88,7 @@ class RandomActor(DummyActor):
         state,
         p=None,
     ):
-        # discrete action space
+        # discrete action space, low: 0, high: action_dim
         if p is None:
             action = torch.randint(
                 low=0,
@@ -100,7 +97,7 @@ class RandomActor(DummyActor):
             )
         else:
             action = torch.multinomial(p.view(-1), 1).view(1, 1)
-        return action.to(device=state.device)
+        return action.to(device=state.device, dtype=state.dtype)
 
 
 class Actor(BaseActor):
@@ -121,7 +118,7 @@ class Actor(BaseActor):
             out_activation=approximator_activation,
         )
 
-    def forward(self, state):
+    def forward(self, state, ):
         return self.approximator(state)
 
     def act(
@@ -131,8 +128,9 @@ class Actor(BaseActor):
         noise_clipping=False,
         c=0.5,
     ):
+        # continuous action space, low: 0, high: 1
         with torch.no_grad():
-            # action, continuous action space
+            # action
             action = self(state)
             # noise
             noise = torch.randn_like(action) * action_noise

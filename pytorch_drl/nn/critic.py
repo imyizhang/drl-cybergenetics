@@ -34,7 +34,7 @@ class Critic(BaseCritic):
         self,
         state_dim,
         action_dim,
-        approximator_dims=(256, 256,),
+        approximator_sizes=(256, 256,),
         approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
     ):
@@ -42,12 +42,12 @@ class Critic(BaseCritic):
         self.approximator = approximator(
             state_dim + action_dim,
             1,
-            approximator_dims,
+            approximator_sizes,
             out_activation=approximator_activation,
         )
 
-    def forward(self, state, action):
-        return self.approximator(torch.cat((state, action), dim=-1))
+    def forward(self, state, action, **kwargs):
+        return self.approximator(torch.cat((state, action), dim=-1), **kwargs)
 
     def configure_optimizer(self, lr):
         return torch.optim.Adam(self.parameters(), lr=lr)
@@ -56,51 +56,50 @@ class Critic(BaseCritic):
         return torch.nn.SmoothL1Loss()
 
 
-class TwinCritic(BaseCritic):
+class TwinCritic(Critic):
 
     def __init__(
         self,
         state_dim,
         action_dim,
-        approximator_dims=(256, 256,),
+        approximator_sizes=(256, 256,),
         approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
         param_sharing=False,
-        hidden_dim=256,
-        embedding_dims=(256,),
+        embedding_sizes=(256,),
     ):
         super().__init__()
         self.param_sharing = param_sharing
         if param_sharing:
             self.embedding = approximator(
                 state_dim + action_dim,
-                hidden_dim,
-                embedding_dims,
+                approximator_sizes[0],
+                embedding_sizes,
                 out_activation=torch.nn.ReLU(),
             )
             self.approximator1 = approximator(
                 hidden_dim,
                 1,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
             self.approximator2 = approximator(
                 hidden_dim,
                 1,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
         else:
             self.approximator1 = approximator(
                 state_dim + action_dim,
                 1,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
             self.approximator2 = approximator(
                 state_dim + action_dim,
                 1,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
 
@@ -125,7 +124,7 @@ class QCritic(BaseCritic):
         self,
         state_dim,
         action_dim,
-        approximator_dims=(256, 256,),
+        approximator_sizes=(256, 256,),
         approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
     ):
@@ -133,7 +132,7 @@ class QCritic(BaseCritic):
         self.approximator = approximator(
             state_dim,
             action_dim,
-            approximator_dims,
+            approximator_sizes,
             out_activation=approximator_activation,
         )
 
@@ -154,45 +153,44 @@ class TwinQCritic(BaseCritic):
         self,
         state_dim,
         action_dim,
-        approximator_dims=(256, 256,),
+        approximator_sizes=(256, 256,),
         approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
         param_sharing=False,
-        hidden_dim=256,
-        embedding_dims=(256,),
+        embedding_sizes=(256,),
     ):
         super().__init__()
         self.param_sharing = param_sharing
         if param_sharing:
             self.embedding = approximator(
                 state_dim,
-                hidden_dim,
-                embedding_dims,
+                approximator_sizes[0],
+                embedding_sizes,
                 out_activation=torch.nn.ReLU(),
             )
             self.approximator1 = approximator(
                 hidden_dim,
                 action_dim,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
             self.approximator2 = approximator(
                 hidden_dim,
                 action_dim,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
         else:
             self.approximator1 = approximator(
                 state_dim,
                 action_dim,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
             self.approximator2 = approximator(
                 state_dim,
                 action_dim,
-                approximator_dims,
+                approximator_sizes,
                 out_activation=approximator_activation,
             )
 
