@@ -5,7 +5,7 @@ import abc
 
 import torch
 
-from .approximator import MLPApproximator
+from .approximator import MLPApproximator, RecurrentApproximator, MemorizedMLPApproximator
 
 
 class BaseCritic(torch.nn.Module):
@@ -34,16 +34,16 @@ class Critic(BaseCritic):
         self,
         state_dim,
         action_dim,
-        approximator_sizes=(256, 256,),
-        approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
+        approximator_hidden_sizes={'hidden_sizes': (256,)},
+        approximator_out_activation=torch.nn.Identity(),
     ):
         super().__init__()
         self.approximator = approximator(
             state_dim + action_dim,
             1,
-            approximator_sizes,
-            out_activation=approximator_activation,
+            approximator_hidden_sizes,
+            out_activation=approximator_out_activation,
         )
 
     def forward(self, state, action, **kwargs):
@@ -62,9 +62,9 @@ class TwinCritic(Critic):
         self,
         state_dim,
         action_dim,
-        approximator_sizes=(256, 256,),
-        approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
+        approximator_hidden_sizes={'hidden_sizes': (256,)},
+        approximator_out_activation=torch.nn.Identity(),
         param_sharing=False,
         embedding_sizes=(256,),
     ):
@@ -153,9 +153,9 @@ class TwinQCritic(BaseCritic):
         self,
         state_dim,
         action_dim,
-        approximator_sizes=(256, 256,),
-        approximator_activation=torch.nn.Identity(),
         approximator=MLPApproximator,
+        approximator_hidden_sizes={'hidden_sizes': (256,)},
+        approximator_out_activation=torch.nn.Identity(),
         param_sharing=False,
         embedding_sizes=(256,),
     ):
