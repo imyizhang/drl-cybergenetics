@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from . import data
+from . import interactor
+from . import nn
+from . import utils
 from .agent import Agent
 from .dummy import DummyAgent
 from .dqn import DQNAgent
