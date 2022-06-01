@@ -18,6 +18,10 @@ from .sac import SACAgent
 
 
 __all__ = (
+    'data',
+    'interactor',
+    'nn',
+    'utils',
     'Agent',
     'DummyAgent',
     'DQNAgent',
