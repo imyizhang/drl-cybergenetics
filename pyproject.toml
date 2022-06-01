@@ -2,7 +2,7 @@
 name = "drl_cybergenetics"
 version = "0.1.0"
 description = "DRL for Cybergenetics"
-authors = ["imyizhang"]
+authors = ["imyizhang", "qbadolle"]
 license = "MIT"
 
 [tool.poetry.dependencies]
