@@ -4,6 +4,6 @@ drl-cybergenetics is a research framework for the use Deep Reinforcement Learnin
 
 Among others, it includes:
 - a CRN and co-cultures custom simulation environments (and soon Gym-like and dm_control-like environments, compatible with high-performance DRL libraries like Baselines and ACME)
-- custom implementations of state-of-the-art DRL agents, like DDQN and DDPG 
+- [TensorLow]([url](https://github.com/tensorflow/tensorflow))-based custom implementations of state-of-the-art DRL agents, like DDQN and DDPG 
 
 The custom environments and DRL agents are specified by independent configuration files.
