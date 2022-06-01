@@ -5,7 +5,7 @@ import abc
 import math
 
 
-class ExplorationScheduler(abc.ABC):
+class ERScheduler(abc.ABC):
 
     def __init__(
         self,
@@ -13,11 +13,11 @@ class ExplorationScheduler(abc.ABC):
         decay_coefficient=0,
         end_er=0.05,
     ):
-        if not hasattr(agent, 'eps_threshold'):
+        if not hasattr(agent, 'exploration_rate'):
             raise RuntimeError
         self.agent = agent
         self.decay_coefficient = decay_coefficient
-        self.start_er = getattr(agent, 'eps_threshold')
+        self.start_er = getattr(agent, 'exploration_rate')
         self.end_er = end_er
         self.curr_er = self.start_er
         # intrinsic step counter
@@ -37,8 +37,8 @@ class ExplorationScheduler(abc.ABC):
         self.curr_step += 1
         # update current exploration rate, self.curr_er, with intrinsic step
         self()
-        # update self.agent.eps_threshold
-        setattr(self.agent, 'eps_threshold', self.curr_er)
+        # update self.agent.exploration_rate
+        setattr(self.agent, 'exploration_rate', self.curr_er)
 
 
 class LinearER(ERScheduler):

@@ -57,7 +57,7 @@ def train_offpolicy(
         if (step + 1) % steps_per_epoch == 0:
             epoch = (step + 1) // steps_per_epoch
             if (epoch % save_every == 0) or (epoch == epochs - 1):
-                agent.save()
+                agent.save('runs/')
             if (epoch % eval_every == 0) or (epoch == epochs - 1):
                 evaluate(agent, env, logger, **eval_kwargs)
             # TODO: logging data analysis
@@ -110,7 +110,7 @@ def train_onpolicy(
         feedback = agent.learn()
         # Handle epoch end
         if (epoch % save_every == 0) or (epoch == epochs - 1):
-            agent.save()
+            agent.save('runs/')
         if (epoch % eval_every == 0) or (epoch == epochs - 1):
             evaluate(agent, env, logger, **eval_kwargs)
     # Close env

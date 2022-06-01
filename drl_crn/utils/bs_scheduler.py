@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import abc
-import math
 
 
-class BatchScheduler(abc.ABC):
+class BSScheduler(abc.ABC):
 
     def __init__(
         self,
@@ -41,7 +40,7 @@ class BatchScheduler(abc.ABC):
         setattr(self.agent, 'batch_size', self.curr_bs)
 
 
-class ConstantBatchSize(BSScheduler):
+class ConstantBS(BSScheduler):
 
     def __call__(self):
         if not hasattr(self.agent, 'buffer'):

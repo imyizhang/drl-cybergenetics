@@ -6,4 +6,4 @@ from .bs_scheduler import *
 from .er_scheduler import *
 from .plotter import *
 
-__all__ = ('ReplayBuffer', 'EpisodicLogger')
+__all__ = ('EpisodicLogger')
