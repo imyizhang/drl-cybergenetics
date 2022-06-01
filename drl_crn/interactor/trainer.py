@@ -23,6 +23,8 @@ def train_offpolicy(
     agent.train()
     # Initialize env and state
     state = env.reset()
+    # Set trajectory start pointer to discriminate trajectories
+    trajectory_start = 0
     # For each step
     for step in range(steps_per_epoch * epochs):
         # Collect experience via interacting with env:
@@ -33,10 +35,12 @@ def train_offpolicy(
             exploration_scheduler.step()
         # perform the action and observe new state from env;
         next_state, reward, done, info = env.step(action)
-        # ignore done signal if it comes from hitting time horizon;
-        done = False if step + 1 == max_steps_per_episode else done
+        # ignore done signal if it comes from hitting time horizon or cutoff via epoch end;
+        done = False if (step + 1 == max_steps_per_episode) or (step + 1 == steps_per_epoch * epochs) else done
+        # update trajectory start pointer
+        trajectory_start = step + 1 if (step + 1) % steps_per_epoch == 0 else trajectory_start
         # cache transition to replay buffer;
-        agent.cache(state, action, reward, next_state, done)
+        agent.cache(state, action, reward, next_state, done, trajectory_start)
         # update state;
         state = next_state
         # handle episode end;
@@ -45,7 +49,7 @@ def train_offpolicy(
             state = env.reset()
         # Learn from experience
         feedback = agent.learn()
-        # TODO: logging feedback: `actor_info`, `actor_objective`, `critic_info`, `critic_objective`
+        # TODO: logging feedback: `actor_objective`, `actor_info`, `critic_objective`, `critic_info`
         # batch size update for agent learning
         if batch_scheduler is not None:
             batch_scheduler.step()
@@ -76,6 +80,8 @@ def train_onpolicy(
     agent.train()
     # Initialize env and state
     state = env.reset()
+    # Set trajectory start pointer to discriminate trajectories
+    trajectory_start = 0
     # For each epoch
     for epoch in range(epochs):
         # Collect experience via interacting with env:
@@ -84,8 +90,12 @@ def train_onpolicy(
             action, V, log_prob = agent.step(state)
             # perform the action and observe new state from env;
             next_state, reward, done, info = env.step(action)
+            # ignore done signal if it comes from hitting time horizon or cutoff via epoch end;
+            done = False if (step + 1 == max_steps_per_episode) or (step + 1 == steps_per_epoch * epochs) else done
+            # update trajectory start pointer
+            trajectory_start = step + 1 if (step + 1) % steps_per_epoch == 0 else trajectory_start
             # cache transition to rollout buffer;
-            agent.cache(state, action, reward, V, log_prob, done)
+            agent.cache(state, action, reward, V, log_prob, done, trajectory_start)
             # update state;
             state = next_state
             # handle trajectory end

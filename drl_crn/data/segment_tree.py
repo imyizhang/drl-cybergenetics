@@ -111,8 +111,7 @@ class SumSegmentTree(SegmentTree):
     def sum(self):
         return self.root
 
-    def retrieve_index(self, upper_bound, eps):
-        assert 0 <= prefixsum <= self.sum() + eps
+    def retrieve_index(self, upperbound, eps):
         # Point to the root
         pointer = 1
         # While non-leaf

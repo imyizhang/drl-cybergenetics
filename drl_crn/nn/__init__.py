@@ -4,7 +4,7 @@
 from .approximator import Approximator
 from .approximator import FeedforwardApproximator, RecurrentApproximator, MemorizedMLP
 from .actor import Actor
-from .actor import ConstantActor, RandomActor, DeterministicActor, StochasticActor
+from .actor import ConstantActor, RandomActor, DeterministicActor, StochasticActor, SquashedActor
 from .actor import DiscreteRandomActor, DiscreteConstantActor, DiscreteStochasticActor
 from .critic import Critic
 from .critic import VCritic, QCritic, TwinQCritic
@@ -20,6 +20,7 @@ __all__ = (
     'RandomActor',
     'DeterministicActor',
     'StochasticActor',
+    'SquashedActor',
     'DiscreteConstantActor',
     'DiscreteRandomActor',
     'DiscreteStochasticActor',
