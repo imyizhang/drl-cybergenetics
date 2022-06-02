@@ -2,15 +2,148 @@
 # -*- coding: utf-8 -*-
 
 import typing
+import math
+import functools
 
 import numpy as np
+import scipy as sp
+import scipy.signal as signal
 import matplotlib.pyplot as plt
 
-from .env import Env
-from .spaces import Discrete, Box
-from .wrapper import Wrapper
-from .dyn_simulator import DynSimulator, EcoliDynSimulator
-from .ref_trajectory import RefTrajectory, ConstantRefTrajectory, BandPassFilter
+from .control.env import Env, Wrapper
+from .control.spaces import Discrete, Box
+
+
+def _const(t, scale):
+    "Constant wave."
+    assert t.ndim == 1
+    return scale + np.zeros_like(t)
+
+
+def _square(t, scale, amplitude, period, phase):
+    "Square wave."
+    assert t.ndim == 1
+    return scale + amplitude * signal.square(2 * np.pi * t / period + phase).astype(t.dtype)
+
+
+def _sin(t, scale, amplitude, period, phase):
+    "Sine or Cosine wave."
+    assert t.ndim == 1
+    return scale + amplitude * np.sin(2 * np.pi * t / period + phase).astype(t.dtype)
+
+
+def _bpf(t, switches):
+    "Band-pass filter (BPF)."
+    assert t.ndim == 1
+    assert switches.ndim == 2 and switches.shape[1] == 2
+    y = np.zeros_like(t)
+    mask_nan = True
+    for i in range(switches.shape[0]):
+        mask = (t == switches[i, 0])
+        np.place(y, mask, switches[i, 1])
+        mask_nan &= (1 - mask)
+    np.place(y, mask_nan, np.nan)
+    return y
+
+
+def _inverse_ae(achieved, desired):
+    "Inverse of absolute error (AE)."
+    return 1.0 / abs(achieved - desired)
+
+
+def _negative_ae(achieved, desired):
+    "Negative absolute error (AE)."
+    return -abs(achieved - desired)
+
+
+def _negative_re(achieved, desired):
+    "Negative relative error (RE)."
+    return -abs(achieved - desired) / desired
+
+
+def _in_tolerance(achieved, desired, tolerance):
+    "Whether falling within tolerance."
+    return int(abs(achieved - desired) / desired < tolerance)
+
+
+def _gauss(achieved, desired, tolerance):
+    "Gauss."
+    return math.exp(-0.5 * (achieved - desired) ** 2 / tolerance ** 2)
+
+
+def _scaled_combination(achieved, desired, tolerance, a, b):
+    "Scaled combination of errors."
+    return _negative_ae(achieved, desired) * a + _in_tolerance(achieved, desired, tolerance) * b
+
+
+class CRN(Physics):
+
+    def __init__(self, args) -> None:
+        self.intensity_thres = intensity_thres
+        self.percentage_thres = percentage_thres
+        self.odes = odes
+        self.system_noise = system_noise
+        self.u = None
+        self.t = 0.0
+        self.y_t = init
+        self._rng = np.random.RandomState(seed=None)
+
+    @property
+    def time(self) -> float:
+        return self.t
+
+    @property
+    def state(self) -> np.ndarray:
+        return self.y_t
+
+    def set_control(self, action: typing.Union[np.ndarray, float]) -> None:
+        self.u = action * self.percentage_thres * self.intensity_thres
+
+    def dynamics(self, t: float, y: np.ndarray, u: float) -> np.ndarray:
+        return self.odes(y, u) + self._rng.normal(0.0, self.system_noise)
+
+    def step(self, T_s: float) -> None:
+        # Dynamics simulation sampling rate
+        delta = 0.1
+        # Dynamics simulation
+        sol = sp.integrate.solve_ivp(
+            self.dynamics,
+            (0, T_s + delta),
+            self.y_t,
+            t_eval=np.arange(0, T_s + delta, delta),
+            args=(self.u,),
+        )
+        # ODEs integration solution
+        self.y_t = sol.y[:, -1]
+        self.y_t = np.clip(self.y_t, self.state_min, self.state_max)
+        self.y_t = self.y_t.astype(self.state_dtype)
+        # Step
+        self.t += T_s
+
+    def seed(self, seed: typing.Optional[int] = None) -> None:
+        self._rng.seed(seed)
+
+
+class Track(Task):
+
+    def __init__(
+        self,
+        trajectory: typing.Callable,
+        tolerance: float,
+
+    ) -> None:
+        self.tolerance = tolerance
+
+    @functools.cache
+    def reference(self, physics):
+        target = self.trajectory(physics.time, **self.trajectory_kwargs)
+        return target, target * (1.0 - self.tolerance), target * (1.0 + self.tolerance)
+
+    def observation(self, physics):
+        return physics.state
+
+    def reward(self, physics):
+        return
 
 
 def make(cls: str, **kwargs):
@@ -49,7 +182,7 @@ class Cache:
         self.__init__()
 
 
-class CRN(Env):
+class CRNEnv(Environment):
 
     _cache = Cache()
 
@@ -276,7 +409,7 @@ class CRN(Env):
         #self.observation_space.seed(seed)
 
 
-class CRNContinuous(CRN):
+class CRNEnvContinuous(CRNEnv):
 
     def __init__(
         self,
