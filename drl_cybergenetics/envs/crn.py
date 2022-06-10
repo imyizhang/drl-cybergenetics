@@ -1,41 +1,40 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import typing
-import math
-import functools
+from typing import (
+    Callable,
+    Optional,
+    Union,
+)
 
 import numpy as np
 import scipy as sp
 import scipy.signal as signal
 import matplotlib.pyplot as plt
 
-from .control.env import Env, Wrapper
-from .control.spaces import Discrete, Box
+from .control import Buffer, Physics, Task, Environment
+from .control.spaces import Space, Discrete, Box
 
+
+# Reference registry for tracking task
 
 def _const(t, scale):
     "Constant wave."
-    assert t.ndim == 1
     return scale + np.zeros_like(t)
 
 
 def _square(t, scale, amplitude, period, phase):
     "Square wave."
-    assert t.ndim == 1
     return scale + amplitude * signal.square(2 * np.pi * t / period + phase).astype(t.dtype)
 
 
 def _sin(t, scale, amplitude, period, phase):
     "Sine or Cosine wave."
-    assert t.ndim == 1
     return scale + amplitude * np.sin(2 * np.pi * t / period + phase).astype(t.dtype)
 
 
 def _bpf(t, switches):
     "Band-pass filter (BPF)."
-    assert t.ndim == 1
-    assert switches.ndim == 2 and switches.shape[1] == 2
     y = np.zeros_like(t)
     mask_nan = True
     for i in range(switches.shape[0]):
@@ -46,316 +45,269 @@ def _bpf(t, switches):
     return y
 
 
-def _inverse_ae(achieved, desired):
+registered_reference = {
+    'const': _const,
+    'square': _square,
+    'sin': _sin,
+    'bpf': _bpf,
+}
+
+
+def register_reference(func: Callable, name: str) -> None:
+    "Customize reference to be tracked."
+    registered_reference[name] = func
+
+
+# Reward registry for tracking task
+
+def _inverse_ae(achieved, desired, tolerance, n=1.0):
     "Inverse of absolute error (AE)."
-    return 1.0 / abs(achieved - desired)
+    return float(np.abs(achieved - desired) ** (-n))
 
 
-def _negative_ae(achieved, desired):
+def _negative_ae(achieved, desired, tolerance, n=1.0):
     "Negative absolute error (AE)."
-    return -abs(achieved - desired)
+    return float(-np.abs(achieved - desired) ** n)
 
 
-def _negative_re(achieved, desired):
+def _negative_re(achieved, desired, tolerance):
     "Negative relative error (RE)."
-    return -abs(achieved - desired) / desired
+    return float(-np.abs(achieved - desired) / desired)
 
 
 def _in_tolerance(achieved, desired, tolerance):
     "Whether falling within tolerance."
-    return int(abs(achieved - desired) / desired < tolerance)
+    return float(np.abs(achieved - desired) / desired < tolerance)
 
 
 def _gauss(achieved, desired, tolerance):
     "Gauss."
-    return math.exp(-0.5 * (achieved - desired) ** 2 / tolerance ** 2)
+    return float(np.exp(-0.5 * (achieved - desired) ** 2 / tolerance ** 2))
 
 
-def _scaled_combination(achieved, desired, tolerance, a, b):
+def _scaled_combination(achieved, desired, tolerance, a=100.0, b=10.0):
     "Scaled combination of errors."
-    return _negative_ae(achieved, desired) * a + _in_tolerance(achieved, desired, tolerance) * b
+    return _negative_ae(achieved, desired, tolerance) * a \
+        + _in_tolerance(achieved, desired, tolerance) * b
+
+
+registered_reward = {
+    'inverse_ae': _inverse_ae,
+    'negative_ae': _negative_ae,
+    'negative_re': _negative_re,
+    'in_tolerance': _in_tolerance,
+    'gauss': _gauss,
+    'scaled_combination': _scaled_combination,
+}
+
+
+def register_reward(func: Callable, name: str) -> None:
+    registered_reward[name] = func
+
+
+def make(cls: str, **kwargs):
+    pass
 
 
 class CRN(Physics):
 
-    def __init__(self, args) -> None:
+    def __init__(
+        self,
+        ode: Callable,
+        ode_kwargs: dict,
+        init_state: np.ndarray,
+        intensity_thres: float,
+        percent_thres: float,
+        action_noise: float,
+        system_noise: float,
+        state_min: Union[np.ndarray, float],
+        state_max: Union[np.ndarray, float],
+        state_info: dict,
+        action_min: Union[np.ndarray, float],
+        action_max: Union[np.ndarray, float],
+        action_info: dict,
+    ) -> None:
+        super().__init__()
+        self.ode = ode
+        self.ode_kwargs = ode_kwargs
+        self.init_state = init_state
         self.intensity_thres = intensity_thres
-        self.percentage_thres = percentage_thres
-        self.odes = odes
+        self.percent_thres = percent_thres
+        self.action_noise = action_noise
         self.system_noise = system_noise
-        self.u = None
-        self.t = 0.0
-        self.y_t = init
-        self._rng = np.random.RandomState(seed=None)
+        self._state = self.init_state
 
-    @property
-    def time(self) -> float:
-        return self.t
+    def reset(self):
+        self._time = 0.0
+        self._state = self.init_state
+        self._control = None
+        self._physical_action = None
 
-    @property
-    def state(self) -> np.ndarray:
-        return self.y_t
+    def dynamics(self, time: float, state: np.ndarray, physical_action: float) -> np.ndarray:
+        return self.ode(state, physical_action, **self.ode_kwargs) + self._rng.normal(0.0, self.system_noise)
 
-    def set_control(self, action: typing.Union[np.ndarray, float]) -> None:
-        self.u = action * self.percentage_thres * self.intensity_thres
+    def set_control(self, action: float) -> None:
+        self._control = action * self.percent_thres * self.intensity_thres
+        action += self._rng.normal(0.0, self.action_noise)
+        action = min(max(action, self.action_min), self.action_max)
+        self._physical_action = action * self.percent_thres * self.intensity_thres
 
-    def dynamics(self, t: float, y: np.ndarray, u: float) -> np.ndarray:
-        return self.odes(y, u) + self._rng.normal(0.0, self.system_noise)
-
-    def step(self, T_s: float) -> None:
+    def step(self, sampling_rate: float) -> None:
         # Dynamics simulation sampling rate
         delta = 0.1
         # Dynamics simulation
         sol = sp.integrate.solve_ivp(
             self.dynamics,
-            (0, T_s + delta),
-            self.y_t,
-            t_eval=np.arange(0, T_s + delta, delta),
-            args=(self.u,),
+            (0, sampling_rate + delta),
+            self._state,
+            t_eval=np.arange(0, sampling_rate + delta, delta),
+            args=(self._physical_action,),
         )
         # ODEs integration solution
-        self.y_t = sol.y[:, -1]
-        self.y_t = np.clip(self.y_t, self.state_min, self.state_max)
-        self.y_t = self.y_t.astype(self.state_dtype)
+        self._state = sol.y[:, -1]
+        self._state = np.clip(self._state, self.state_min, self.state_max)
         # Step
-        self.t += T_s
+        self._time += sampling_rate
 
-    def seed(self, seed: typing.Optional[int] = None) -> None:
-        self._rng.seed(seed)
+    def time(self) -> float:
+        return np.array([self._time])
+
+    def state(self) -> np.ndarray:
+        return self._state
+
+    def control(self):
+        return self._control.astype(self.state_dtype)
+
+    def physical_action(self):
+        return self._physical_action.astype(self.state_dtype)
 
 
 class Track(Task):
 
     def __init__(
         self,
-        trajectory: typing.Callable,
+        reference: Union[Callable, str],
+        reference_kwargs: dict,
+        reward: Union[Callable, str],
+        reward_kwargs: dict,
+        sampling_rate: float,
         tolerance: float,
-
+        dim_observed: int,
+        observation_noise: float,
     ) -> None:
+        super().__init__()
+        self.reference_func = reference if callable(reference) else registered_reference[reference]
+        self.reference_kwargs = reference_kwargs
+        self.reward_func = reward if callable(reward) else registered_reward[reward]
+        self.reward_kwargs = reward_kwargs
+        self.sampling_rate = sampling_rate
         self.tolerance = tolerance
+        self.dim_observed = dim_observed
+        self.observation_noise = observation_noise
 
-    @functools.cache
+    def action_space(self, physics: Physics) -> Space:
+        return Box(
+            low=physics.state_min,
+            high=physics.state_max,
+            shape=physics.state_shape,
+            dtype=physics.state_dtype,
+        )
+
+    def observation_space(self, physics: Physics) -> Space:
+        return Box(
+            low=physics.state_min,
+            high=physics.state_max,
+            shape=physics.state_shape,
+            dtype=physics.state_dtype,
+        )
+
+    def before_step(self, action: ActType, physics: Physics) -> None:
+        if isinstance(self.action_space, Discrete):
+            action = (action + 1) / self.action_space.n
+            action = _rescale(action, (0, 1), (physics.action_min, physics.action_max))
+        else:
+            action = float(action[0])
+            action = _rescale(action, (0, 1), (physics.action_min, physics.action_max))
+        physics.set_control(action)
+
+    def step(self, physics):
+        physics.step(self.sampling_rate)
+        self._timestep += 1
+
+    def timestep(self):
+        return self._timestep
+
     def reference(self, physics):
-        target = self.trajectory(physics.time, **self.trajectory_kwargs)
-        return target, target * (1.0 - self.tolerance), target * (1.0 + self.tolerance)
+        self._reference = self.reference_func(
+            np.array([physics.time]),
+            **self.reference_kwargs
+        )
+        return self._reference
 
     def observation(self, physics):
-        return physics.state
+        self._observation = physics.state[[self.dim_observed]]
+        self._observation += self._rng.normal(0.0, self.observation_noise)
+        self._observation = np.clip(self._observation, physics.state_min, physics.state_max)
+        return self._observation
 
     def reward(self, physics):
-        return
+        self._reward = self.reward_func(self._observation, self._reference, self.tolerance, **self.reward_kwargs)
+        return self._reward
 
 
-def make(cls: str, **kwargs):
-    if cls == 'CRN-v0':
-        return CRN(**kwargs)
-    elif cls == 'CRNContinuous-v0':
-        return CRNContinuous(**kwargs)
-    else:
-        raise RuntimeError
+class DiscreteTrack(Track):
 
-
-class Cache:
-
-    def __init__(self):
-        # time, default: np.float32
-        self.t = []
-        # states, default: np.float32
-        self.trajectory = []
-        # noise corrupted target observations, default: np.float32
-        self.observations = []
-        # actions input, default: float
-        self.actions = []
-        # noise corrupted actions taken, default: float
-        self.actions_taken = []
-        # rewards measuring the distance target observation and reference trajectory, default: float
-        self.rewards = []
-        # steps done
-        self.steps_done = 0
-        # counts of the occurrence that target observation which tracks reference falls in tolerance
-        self.aggregator_in_tolerance = []
-
-    def step(self):
-        self.steps_done += 1
-
-    def reset(self):
-        self.__init__()
+    def action_space(self, physics: Physics) -> Space:
+        return Discrete(n=20)
 
 
 class CRNEnv(Environment):
 
-    _cache = Cache()
-
-    def __init__(
-        self,
-        dyn_simulator: DynSimulator = EcoliDynSimulator(),
-        ref_trajectory: RefTrajectory = ConstantRefTrajectory(),
-        sampling_rate: float = 10,
-        system_noise: float = 1e-3,
-        observation_noise: float = 1e-3,
-        action_noise: float = 1e-3,
-    ) -> None:
-        super().__init__()
-        # dynamics simulator
-        self.dyn_simulator = dyn_simulator
-        # reference trajectory generator
-        self.ref_trajectory = ref_trajectory
-        # sampling rate in minutes
-        self.T_s = sampling_rate
-        # dynamics system noise
-        self.system_noise = system_noise
-        # target observation noise
-        self.observation_noise = observation_noise
-        # action taken noise
-        self.action_noise = action_noise
-        # observation space
-        self.observation_space = Box(
-            low=self.dyn_simulator.state_min,
-            high=self.dyn_simulator.state_max,
-            shape=self.dyn_simulator.state_shape,
-            dtype=self.dyn_simulator.state_dtype,
-        )
-        # discrete action space
-        self.action_space = Discrete(n=20)  # number of discrete actions
-
-    def reset(self):
-        self._cache.reset()
-        # time
-        self._cache.t.append(np.zeros((1,), dtype=self.observation_space.dtype))  # intitial t = 0
-        # state
-        state = self.dyn_simulator.init  # initial state
-        self._cache.trajectory.append(state)
-        # target observation
-        observation = state[[self.dyn_simulator.dim_observed]]  # initial target observation
-        self._cache.observations.append(observation)
-        return state
-
-    def step(self, action: typing.Union[int, np.ndarray], reward_func: str):
-        # reset first
-        if not self._cache.trajectory:
+    def render(self, mode: str = 'human', buffer: Optional[Buffer] = None):
+        # reset first or load buffer first
+        if self._buffer.empty() and (buffer is None):
             raise RuntimeError
-        # time
-        t = np.array([self.T_s * self._cache.steps_done + self.T_s], dtype=self.observation_space.dtype)  # t + T_s
-        self._cache.t.append(t)
-        # action
-        if isinstance(self.action_space, Discrete):
-            action = self.dyn_simulator.action_min + (action + 1) / self.action_space.n * (self.dyn_simulator.action_max - self.dyn_simulator.action_min)
-        else:
-            action = float(action[0])
-        self._cache.actions.append(action)
-        # noise corrupted action taken
-        action_taken = action + self._rng.normal(0.0, self.action_noise)
-        action_taken = min(max(action_taken, self.dyn_simulator.action_min), self.dyn_simulator.action_max)  # clip
-        self._cache.actions_taken.append(action_taken)
-        # state
-        state = self._cache.trajectory[self._cache.steps_done]  # y(t)
-        state = self.dyn_simulator(state, self.T_s, action_taken, self.system_noise)  # y(t + T_s)
-        self._cache.trajectory.append(state)
-        # noise corrupted target observation
-        observation = state[[self.dyn_simulator.dim_observed]]  # obs(t + T_s)
-        observation += self._rng.normal(0.0, self.observation_noise)
-        observation = np.clip(observation, self.dyn_simulator.state_min, self.dyn_simulator.state_max)  # clip
-        self._cache.observations.append(observation)
-        # reward
-        ref, _ = self.ref_trajectory(t)  # ref(t + T_s)
-        reward = self._compute_reward(float(observation[0]), float(ref[0]), reward_func)
-        self._cache.rewards.append(reward)
-        # done
-        done = False
-        # info
-        info = {
-            'count_in_tolerance': self._count_in_tolerance(float(state[[self.dyn_simulator.dim_observed]][0]), float(ref[0])),
-        }
-        # step
-        self._cache.step()
-        return state, reward, done, info
-
-    def _compute_reward(self, achieved: float, desired: float, func: str) -> float:
-        if np.isnan(desired):
-            return 0
-        p = 1
-        if func == 'neg_error':
-            reward = -abs(achieved - desired) ** p
-        elif func == 'inverse_error':
-            reward = abs(achieved - desired) ** (-p)
-        elif func == 'neg_relative_error':
-            reward = -abs(achieved - desired) / desired
-        elif func == 'in_tolerance':
-            reward = self._count_in_tolerance(achieved, desired)
-        elif func == 'percentage_in_tolerance':
-            self._cache.aggregator_in_tolerance.append(self._count_in_tolerance(achieved, desired))
-            reward = float(np.array(self._cache.aggregator_in_tolerance).mean())
-        elif func == 'scaled_error':
-            reward = -abs(achieved - desired) ** p * 100 + self._count_in_tolerance(achieved, desired) * 10
-        elif func == 'gaussian':
-            reward = float(
-                np.exp(
-                -(achieved - desired) ** 2 / self.ref_trajectory.tolerance ** 2
-                )
-            )
-        else:
-            raise RuntimeError
-        return reward
-
-    def _count_in_tolerance(self, achieved: float, desired: float) -> int:
-        return int((abs(achieved - desired) / desired < self.ref_trajectory.tolerance))
-
-    def render(self, mode: str = 'human', cache: typing.Optional[Cache] = None):
-        # reset first or load cache first
-        if (not self._cache.trajectory) and (cache is None):
-            raise RuntimeError
-        cache = self._cache if cache is None else cache
-        # reference trajectory with tolerance margins as time
-        delta = 0.1  # simulation sampling rate
-        t_ref = np.arange(0, self.T_s * cache.steps_done + delta, delta)
-        ref_trajectory, tolerance_margin = self.ref_trajectory(t_ref)
-        # states vs. time
-        t = np.arange(0, self.T_s * cache.steps_done + self.T_s, self.T_s)
-        trajectory = np.stack(cache.trajectory, axis=1)
-        # target observations vs. time
-        observations = np.concatenate(cache.observations, axis=0)
-        # intensity as time
-        t_I = np.concatenate([np.arange(self.T_s * i, self.T_s * (i + 1) + 1) for i in range(cache.steps_done)])
-        actions = np.array(cache.actions).repeat(self.T_s + 1)
-        I = actions * self.dyn_simulator.percentage_thres / 100 * self.dyn_simulator.intensity_thres
-        actions_taken = np.array(cache.actions_taken).repeat(self.T_s + 1)
-        I_applied = actions_taken * self.dyn_simulator.percentage_thres / 100 * self.dyn_simulator.intensity_thres
-        # rewards vs. time
-        rewards = np.array(cache.rewards)
-        # plot settings
-        colors = self.dyn_simulator.state_colors
-        labels = self.dyn_simulator.state_labels
-        color_I = 'tab:blue'
-        color_r = 'tab:orange'
-        # experimental observation, partially shown
+        buffer = self._buffer if buffer is None else buffer
+        tolerance = self._task.tolerance
+        sampling_rate = self._task.sampling_rate
+        dim = self._task.dim_observed
+        # Data: reference trajectory & observation / state  vs. time
+        time = np.array(buffer.time)
+        reference = np.concatenate(buffer.reference, axis=0)
+        observation = np.concatenate(buffer.observation, axis=0)
+        state = np.stack(buffer.state, axis=1)
+        # Data: control signal vs. time
+        time_control = np.concatenate([np.arange(sampling_rate * i, sampling_rate * (i + 2), sampling_rate) for i in range(len(buffer) - 1)])
+        control = np.array(buffer.control[1:]).repeat(2)
+        physical_action = np.array(buffer.physical_action[1:]).repeat(2)
+        # action = np.array(buffer.action[1:]).repeat(2)
+        # Data: reward vs. time
+        time_reward = time[1:]
+        reward = np.array(buffer.reward[1:])
+        try:
+            import seaborn as sns
+            sns.set_theme(style='darkgrid')
+        except ImportError:
+            pass
+        # Partially shown
         if mode == 'human':
-            fig, axs = plt.subplots(
+            fig, axes = plt.subplots(
                 nrows=2,
                 ncols=1,
                 figsize=(10, 5),
                 sharex=True,
-                gridspec_kw={'height_ratios': [2, 1]}
+                gridspec_kw={'height_ratios': [2, 1]},
             )
             fig.tight_layout()
-            # subplot: reference trajectory with tolerance margins as time
-            if np.isnan(ref_trajectory).any():
-                axs[0].scatter(t_ref, ref_trajectory, color='grey')
-                axs[0].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
-            else:
-                axs[0].plot(t_ref, ref_trajectory, '--', color='grey')
-                axs[0].fill_between(t_ref, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
-            # & target observations vs. time
-            axs[0].plot(t, observations, 'o--', label=labels[self.dyn_simulator.dim_observed], color=colors[self.dyn_simulator.dim_observed], alpha=0.5)
-            axs[0].legend(framealpha=0.2)
-            axs[0].set_ylabel('')
-            # subplot: intensity as time
-            axs[1].plot(t_I, I, '-', label='I', color=color_I)
-            axs[1].legend(framealpha=0.2)
-            axs[1].set_ylabel('intensity')
-            axs[1].set_xlabel('Time (min)')
-        # dashboard, fully shown
+            # Subplot: reference trajectory & observation vs. time
+            self.plot_reference(axes[0], time, reference, tolerance)
+            self.plot_observation(axes[0], time, observation)
+            # Subplot: control signal vs. time
+            self.plot_control(axes[1], time_control, control)
+            axes[1].set_xlabel('Time (min)')
+        # Fully shown
         else:
-            fig, axs = plt.subplots(
+            fig, axes = plt.subplots(
                 nrows=2,
                 ncols=2,
                 figsize=(10, 5),
@@ -363,75 +315,58 @@ class CRNEnv(Environment):
                 gridspec_kw={'height_ratios': [2, 1]}
             )
             fig.tight_layout()
-            # subplot: reference trajectory with tolerance margins as time
-            if np.isnan(ref_trajectory).any():
-                axs[0, 0].scatter(t_ref, ref_trajectory, color='grey')
-                axs[0, 0].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
-            else:
-                axs[0, 0].plot(t_ref, ref_trajectory, '--', color='grey')
-                axs[0, 0].fill_between(t_ref, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
-            # & states vs. time
-            for i, (label, color) in enumerate(zip(labels, colors)):
-                axs[0, 0].plot(t, trajectory[i], 'o-', label=label, color=color)
-            axs[0, 0].legend(framealpha=0.2)
-            axs[0, 0].set_ylabel('')
-            # subplot: intensity as time
-            axs[1, 0].plot(t_I, I, '-', label='I', color=color_I)
-            axs[1, 0].plot(t_I, I_applied, '--', label='I applied', color=color_I, alpha=0.5)
-            axs[1, 0].legend(framealpha=0.2)
-            axs[1, 0].set_ylabel('intensity')
-            axs[1, 0].set_xlabel('Time (min)')
-            # subplot: reference trajectory with tolerance margins as time
-            if np.isnan(ref_trajectory).any():
-                axs[0, 1].scatter(t_ref, ref_trajectory, color='grey')
-                axs[0, 1].errorbar(t_ref, ref_trajectory, yerr=ref_trajectory * self.ref_trajectory.tolerance, color='grey')
-            else:
-                axs[0, 1].plot(t_ref, ref_trajectory, '--', color='grey')
-                axs[0, 1].fill_between(t_ref, tolerance_margin[0], tolerance_margin[1], color='grey', alpha=0.2)
-            # & target observations vs. time
-            axs[0, 1].plot(t, trajectory[self.dyn_simulator.dim_observed], 'o-', label=labels[self.dyn_simulator.dim_observed], color=colors[self.dyn_simulator.dim_observed])
-            axs[0, 1].plot(t, observations, 'o--', label=labels[self.dyn_simulator.dim_observed] + ' observed', color=colors[self.dyn_simulator.dim_observed], alpha=0.5)
-            axs[0, 1].legend(framealpha=0.2)
-            axs[0, 1].set_ylabel('')
-            # subplot: rewards vs. time
-            axs[1, 1].plot(t[1:], rewards, color=color_r)
-            axs[1, 1].set_ylabel('reward')
-            axs[1, 1].set_xlabel('Time (min)')
+            # Subplot: reference trajectory & state vs. time
+            self.plot_reference(axes[0, 0], time, reference, tolerance)
+            self.plot_state(axes[0, 0], time, state)
+            # Subplot: control signal vs. time
+            self.plot_control(axes[1, 0], time_control, control, physical_action)
+            axes[1, 0].set_xlabel('Time (min)')
+            # Subplot: reference trajectory & observation vs. time
+            self.plot_reference(axes[0, 1], time, reference, tolerance)
+            self.plot_observation(axes[0, 1], time, observation, state)
+            # Subplot: reward vs. time
+            self.plot_reward(axes[1, 1], time_reward, reward)
+            axes[1, 1].set_xlabel('Time (min)')
         return fig
 
-    def close(self) -> None:
-        self._cache = Cache()
+    @staticmethod
+    def plot_state(ax, time, state, **state_info):
+        for i, (label, color) in enumerate(zip(labels, colors)):
+            ax.plot(time, state[i], 'o-', label=label, color=color)
+            ax.plot(time[-1], state[-1], marker='.')
+        ax.legend(framealpha=0.2)
+        ax.set_ylabel('')
 
-    def seed(self, seed: typing.Optional[int] = None) -> None:
-        self._rng.seed(seed)
-        self.dyn_simulator.seed(seed)
-        self.action_space.seed(seed)
-        #self.observation_space.seed(seed)
+    @staticmethod
+    def plot_control(ax, time, control, label, color, physical_action=None):
+        ax.plot(time, control, '-', label=label, color=color)
+        ax.plot(time[-1], control[-1], marker='.', color=color)
+        if physical_action is not None:
+            ax.plot(time, physical_action, '--', label='I applied', color=color, alpha=0.5)
+            ax.plot(time[-1], physical_action[-1], marker='.', color=color)
+        ax.legend(framealpha=0.2)
+        ax.set_ylabel('intensity')
 
+    @staticmethod
+    def plot_reference(ax, time, reference, tolerance=None, color='grey'):
+        if np.isnan(reference).any():
+            ax.scatter(time, reference, color=color)
+            ax.errorbar(time, reference, yerr=reference * tolerance, color=color)
+        else:
+            ax.plot(time, reference, '--', color=color)
+            lower_bound = reference * (1 - tolerance)
+            upper_bound = reference * (1 + tolerance)
+            ax.fill_between(time, lower_bound, upper_bound, color=color, alpha=0.2)
+        ax.set_ylabel('')
 
-class CRNEnvContinuous(CRNEnv):
+    @staticmethod
+    def plot_observation(ax, time, observation, label, color):
+        ax.plot(time, observation, '-', label=label + ' observed', color=color)
+        ax.plot(time, observation, '--', label=label, color=color, alpha=0.5)
+        ax.legend(framealpha=0.2)
+        ax.set_ylabel('')
 
-    def __init__(
-        self,
-        dyn_simulator: DynSimulator = EcoliDynSimulator(),
-        ref_trajectory: RefTrajectory = ConstantRefTrajectory(),
-        sampling_rate: float = 10,
-        system_noise: float = 1e-3,
-        observation_noise: float = 1e-3,
-        action_noise: float = 1e-3,
-    ) -> None:
-        super().__init__(
-            dyn_simulator,
-            ref_trajectory,
-            sampling_rate,
-            system_noise,
-            observation_noise,
-            action_noise,
-        )
-        # continuous action space, overwriting discrete action space
-        self.action_space = Box(
-            low=self.dyn_simulator.action_min,
-            high=self.dyn_simulator.action_max,
-            shape=(1,),
-            dtype=np.float32,  # dtype
-        )
+    @staticmethod
+    def plot_reward(ax, time, reward, color):
+        ax.plot(time, reward, color=color)
+        ax.set_ylabel('Reward')
