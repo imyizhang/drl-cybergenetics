@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from . import data
-from . import interactor
-from . import nn
-from . import utils
 from .agent import Agent
 from .dummy import DummyAgent
 from .dqn import DQNAgent
@@ -18,10 +14,6 @@ from .sac import SACAgent
 
 
 __all__ = (
-    'data',
-    'interactor',
-    'nn',
-    'utils',
     'Agent',
     'DummyAgent',
     'DQNAgent',

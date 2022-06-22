@@ -2,15 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import abc
-from typing import (
-    TypeVar,
-    Generic,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union
-)
+from typing import TypeVar, Generic, Optional, Sequence, Tuple, Type, Union
 
 import numpy as np
 
@@ -27,7 +19,7 @@ class Space(Generic[T_cov]):
         dtype: Optional[Type] = None,
     ) -> None:
         self._shape = shape if shape is None else tuple(shape)
-        self.dtype = dtype
+        self.dtype = dtype if dtype is None else np.dtype(dtype)
         self._rng = np.random.RandomState(seed=None)
 
     @property
@@ -51,6 +43,9 @@ class Discrete(Space[int]):
 
     def sample(self) -> int:
         return self._rng.randint(0, self.n)
+
+    def __repr__(self) -> str:
+        return f'Discrete({self.n})'
 
 
 class Box(Space[np.ndarray]):
@@ -79,4 +74,7 @@ class Box(Space[np.ndarray]):
         self.high = high.astype(self.dtype) if isinstance(high, np.ndarray) else np.full(shape, high, dtype=dtype)
 
     def sample(self) -> np.ndarray:
-        return self._rng.uniform(ow=self.low, high=self.high, size=self.shape).astype(self.dtype)
+        return self._rng.uniform(low=self.low, high=self.high, size=self.shape).astype(self.dtype)
+
+    def __repr__(self) -> str:
+        return f'Box({self.low}, {self.high}, {self.shape}, {self.dtype})'

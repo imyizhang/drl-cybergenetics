@@ -1,15 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from typing import Optional, Tuple, Union
 import pathlib
-from typing import (
-    Optional,
-    Tuple,
-)
 
 import numpy as np
-import matplotlib.animation as animation
 import torch
+import imageio
 
 from .env import (
     ObsType,
@@ -25,7 +22,12 @@ from .spaces import Discrete, Box
 class AsTensor(Wrapper):
     """Wrapper that transforms data types to PyTorch tensors."""
 
-    def __init__(self, env: Env, dtype=torch.float32, device=None) -> None:
+    def __init__(
+        self,
+        env: Env,
+        dtype: torch.dtype = torch.float32,
+        device: Optional[Union[str, torch.device]] = None,
+    ) -> None:
         super().__init__(env)
         self.dtype = dtype
         self.device = device
@@ -44,13 +46,13 @@ class AsTensor(Wrapper):
     @property
     def action_sample(self) -> torch.Tensor:
         action = self.action_space.sample()
-        return torch.as_tensor(action, self.dtype, self.device)
+        return self.as_tensor(action, self.dtype, self.device)
 
     def reset(self) -> torch.Tensor:
         observation = self.env.reset()
-        return torch.as_tensor(observation, self.dtype, self.device)
+        return self.as_tensor(observation, self.dtype, self.device)
 
-    def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, ..., dict]:
+    def step(self, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         if isinstance(self.action_space, Discrete):
             action = action.cpu().detach().item()
         else:
@@ -66,7 +68,7 @@ class AsTensor(Wrapper):
         return torch.as_tensor(data, dtype=dtype, device=device).view(1, -1)
 
 
-class LimitedTimestep(Wrapper):
+class LimitTimestep(Wrapper):
     """Wrapper that limits timesteps per episode."""
 
     def __init__(self, env: Env, max_episode_steps: int) -> None:
@@ -81,23 +83,7 @@ class LimitedTimestep(Wrapper):
         return observation, reward, done, info
 
 
-class EpisodeRecorder(Wrapper):
-    """Wrapper that records video."""
-
-    def __init__(self, env, path: Optional[pathlib.Path, str]) -> None:
-        super().__init__(env)
-        self.path = pathlib.Path(path)
-        self._figs = []
-
-    def step(self, action: ActType, **kwargs) -> Tuple[ObsType, float, bool, dict]:
-        observation, reward, done, info = super().step(action)
-        self._figs.append(super().render(**kwargs))
-        if done:
-            anim = animation.ArtistAnimation(self._figs[0], self._figs, interval=200)
-        return observation, reward, done, info
-
-
-class EpisodeTracker(Wrapper):
+class TrackEpisode(Wrapper):
     """Wrapper that keeps track of cumulative reward and episode length."""
 
     def __init__(self, env: Env) -> None:
@@ -120,20 +106,42 @@ class EpisodeTracker(Wrapper):
         return observation, reward, done, info
 
 
-class PartialObservation(ObservationWrapper):
-    """Wrapper that partially observes states."""
+class RecordEpisode(Wrapper):
+    """Wrapper that records video of episode."""
+
+    def __init__(self, env: Env, path: Union[str, pathlib.Path], **render_kwargs) -> None:
+        super().__init__(env)
+        self.path = pathlib.Path(path)
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.render_kwargs = render_kwargs
+        self._frames = []
+
+    def step(self, action: ActType) -> Tuple[ObsType, float, bool, dict]:
+        observation, reward, done, info = super().step(action)
+        fig = super().render(**self.render_kwargs)
+        frame = self.path.joinpath(f'fig{self.buffer.curr_timestep.timestep}.png')
+        fig.savefig(frame)
+        self._frames.append(frame)
+        if done:
+            with imageio.get_writer('episode.gif', mode='I') as writer:
+                for frame in self._frames:
+                    writer.append_data(imageio.imread(frame))
+        return observation, reward, done, info
+
+
+class FullObservation(ObservationWrapper):
+    """Wrapper that observes physical internal state."""
 
     def __init__(self, env: Env) -> None:
         super().__init__(env)
         self.observation_space = Box(
-            low=self.observation_space.low,
-            high=self.observation_space.high,
-            shape=(1,),
-            dtype=self.observation_space.dtype,
+            low=self.physics.state_min,
+            high=self.physics.state_max,
+            dtype=self.physics.dtype,
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        return self.buffer.timestep.observation
+        return self.buffer.curr_timestep.state
 
 
 class TimeAwareObservation(ObservationWrapper):
@@ -148,7 +156,7 @@ class TimeAwareObservation(ObservationWrapper):
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        return np.append(observation, self.buffer.timestep.time)
+        return np.append(observation, self.buffer.curr_timestep.time).astype(self.observation_space.dtype)
 
 
 class TimestepAwareObservation(ObservationWrapper):
@@ -163,7 +171,7 @@ class TimestepAwareObservation(ObservationWrapper):
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        return np.append(observation, self.buffer.timestep.timestep)
+        return np.append(observation, self.buffer.curr_timestep.timestep).astype(self.observation_space.dtype)
 
 
 class ReferenceAwareObservation(ObservationWrapper):
@@ -178,7 +186,7 @@ class ReferenceAwareObservation(ObservationWrapper):
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        return np.append(observation, self.buffer.timestep.reference)
+        return np.append(observation, self.buffer.curr_timestep.reference).astype(self.observation_space.dtype)
 
 
 class ToleranceAwareObservation(ObservationWrapper):
@@ -193,10 +201,10 @@ class ToleranceAwareObservation(ObservationWrapper):
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        reference = self.buffer.timestep.reference
+        reference = self.buffer.curr_timestep.reference
         tolerance = self.task.tolerance
         _in_tolerance = self.in_tolerance(observation, reference, tolerance)
-        return np.append(observation, _in_tolerance)
+        return np.append(observation, _in_tolerance).astype(self.observation_space.dtype)
 
     @staticmethod
     def in_tolerance(achieved, desired, tolerance):
@@ -215,23 +223,30 @@ class ActionAwareObservation(ObservationWrapper):
         )
 
     def observation(self, observation: ObsType) -> ObsType:
-        return np.append(observation, self.buffer.timestep.action)
+        return np.append(observation, self.buffer.curr_timestep.action).astype(self.observation_space.dtype)
 
 
-class RescaledAction(ActionWrapper):
-    """Wrapper that resize action space."""
+class RescaleAction(ActionWrapper):
+    """Wrapper that affinely rescales continuous action space."""
 
-    def __init__(self, env: Env) -> None:
+    def __init__(
+        self,
+        env: Env,
+        action_min: Union[float, np.ndarray] = 0.0,
+        action_max: Union[float, np.ndarray] = 1.0,
+    ) -> None:
         super().__init__(env)
+        self._from_range = (self.action_space.low, self.action_space.high)
         self.action_space = Box(
-            low=self.action_space.low,
-            high=self.action_space.high,
+            low=action_min,
+            high=action_max,
             shape=(1,),
-            dtype=self.env.observation_space.dtype,
+            dtype=self.action_space.dtype,
         )
+        self._to_range = (self.action_space.low, self.action_space.high)
 
     def action(self, action: ActType) -> ActType:
-        raise NotImplementedError
+        raise self.rescale(action, self._from_range, self._to_range)
 
     @staticmethod
     def rescale(data, from_range, to_range):

@@ -9,6 +9,7 @@ from .control import (
     Task,
     Environment,
 )
+from . import spaces
 
 __all__ = (
     'Timestep',
@@ -17,4 +18,5 @@ __all__ = (
     'Physics',
     'Task',
     'Environment',
+    'spaces',
 )

@@ -2,13 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import abc
-from typing import (
-    TypeVar,
-    Generic,
-    Any,
-    Optional,
-    Tuple,
-)
+from typing import TypeVar, Generic, Any, Callable, Optional, Tuple
 
 import numpy as np
 
@@ -20,12 +14,14 @@ ActType = TypeVar('ActType')
 
 
 class Env(Generic[ObsType, ActType]):
-    """Environment with arbitrary behind-the-scenes dynamics, which can be
+    """Environment with arbitrary behind-the-scenes dynamics, that can be
     partially or fully observed.
     """
 
     observation_space: Space[ObsType]
     action_space: Space[ActType]
+
+    reward_range = (-float('inf'), float('inf'))
 
     def __init__(self) -> None:
         self._rng = np.random.RandomState(seed=None)
@@ -62,7 +58,7 @@ class Wrapper(Env[ObsType, ActType]):
         self._action_space = None
 
     def __getattr__(self, attr: str):
-        if attr.startwith('_'):
+        if attr.startswith('_'):
             raise AttributeError
         return getattr(self.env, attr)
 
@@ -128,3 +124,59 @@ class ActionWrapper(Wrapper):
 
     def action(self, action: ActType) -> ActType:
         raise NotImplementedError
+
+
+class RewardWrapper(Wrapper):
+    """Wrappers that can modify reward  via `reward()` method."""
+
+    def step(self, action: ActType) -> Tuple[ObsType, float, bool, dict]:
+        observation, reward, done, info = self.env.step(action)
+        return observation, self.reward(reward), done, info
+
+    def reward(self, reward: float) -> float:
+        raise NotImplementedError
+
+
+class TransformObservation(ObservationWrapper):
+    """Wrapper that can transform observation via `transform()` function.
+
+    Warning:
+        Observation space should be updated if necessary.
+    """
+
+    def __init__(self, env: Env, transform: Callable) -> None:
+        super().__init__(env)
+        self.transform = transform
+
+    def observation(self, observation: ObsType) -> ObsType:
+        return self.transform(observation)
+
+
+class TransformAction(ActionWrapper):
+    """Wrapper that can transform action via `transform()` function.
+
+    Warning:
+        Action space should be updated if necessary.
+    """
+
+    def __init__(self, env: Env, transform: Callable) -> None:
+        super().__init__(env)
+        self.transform = transform
+
+    def action(self, action: ActType) -> ActType:
+        return self.transform(action)
+
+
+class TransformReward(RewardWrapper):
+    """Wrapper that can transform reward via `transform()` function.
+
+    Warning:
+        Reward range should be updated if necessary.
+    """
+
+    def __init__(self, env: Env, transform: Callable) -> None:
+        super().__init__(env)
+        self.transform = transform
+
+    def reward(self, reward: float) -> float:
+        return self.transform(reward)
